@@ -1,0 +1,58 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release tag matches package version
+        run: |
+          set -euo pipefail
+
+          VERSION="$(node -p 'require("./package.json").version')"
+          TAG="v${VERSION}"
+
+          if ! TAG_COMMIT="$(git rev-parse --verify --quiet "refs/tags/${TAG}^{commit}")"; then
+            echo "::error::Release tag ${TAG} does not exist. Push the tag before publishing."
+            exit 1
+          fi
+
+          HEAD_COMMIT="$(git rev-parse HEAD^{commit})"
+          if [[ "$TAG_COMMIT" != "$HEAD_COMMIT" ]]; then
+            echo "::error::Release tag ${TAG} points to ${TAG_COMMIT} but the checked-out commit is ${HEAD_COMMIT}."
+            exit 1
+          fi
+
+          echo "Publishing ${VERSION} from ${TAG} (${TAG_COMMIT})"
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Inspect package contents
+        run: npm pack --dry-run
+
+      - name: Publish package
+        run: npm publish --provenance --access public

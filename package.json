@@ -1,0 +1,40 @@
+{
+  "name": "@zeropress/wxr-import",
+  "version": "0.7.0",
+  "description": "ZeroPress WXR to preview-data converter CLI",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "zeropress-wxr-import": "bin/zeropress-wxr-import.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zeropress-app/zeropress-wxr-import.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zeropress-app/zeropress-wxr-import/issues"
+  },
+  "homepage": "https://github.com/zeropress-app/zeropress-wxr-import#readme",
+  "keywords": [
+    "zeropress",
+    "wordpress",
+    "wxr",
+    "preview-data",
+    "static-site-generator"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@zeropress/preview-data-validator": "0.7.1",
+    "@zeropress/slug-policy": "0.2.1",
+    "sax": "1.6.0"
+  }
+}

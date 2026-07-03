@@ -1,0 +1,427 @@
+import { addWarning } from './report.js';
+import { normalizeSlugSegment } from './slug.js';
+import { itemCategories, postMetaValue, wpText } from './xml.js';
+
+export function extractNavMenuTerms(doc) {
+  const terms = [];
+  const wpTerms = Array.isArray(doc?.terms) ? doc.terms : [];
+  for (let index = 0; index < wpTerms.length; index += 1) {
+    const term = wpTerms[index];
+    if (wpText(term, 'term_taxonomy') !== 'nav_menu') {
+      continue;
+    }
+    const slug = normalizeSlugSegment(wpText(term, 'term_slug') || wpText(term, 'term_name'));
+    if (!slug) {
+      continue;
+    }
+    terms.push({
+      slug,
+      name: wpText(term, 'term_name') || slug,
+      order: Number.isSafeInteger(term.order) && term.order >= 0 ? term.order : index,
+    });
+  }
+  return terms;
+}
+
+export function extractNavMenuItem(item) {
+  const wpId = wpText(item, 'post_id');
+  if (!wpId) {
+    return null;
+  }
+
+  return {
+    wpId,
+    parentWpId: postMetaValue(item, '_menu_item_menu_item_parent') || '0',
+    menuSlugs: navMenuSlugsForItem(item),
+    order: Number.parseInt(wpText(item, 'menu_order') || '0', 10) || 0,
+    title: String(item?.title ?? '').trim(),
+    itemType: postMetaValue(item, '_menu_item_type'),
+    objectType: postMetaValue(item, '_menu_item_object'),
+    objectId: postMetaValue(item, '_menu_item_object_id'),
+    target: postMetaValue(item, '_menu_item_target') === '_blank' ? '_blank' : '_self',
+    url: postMetaValue(item, '_menu_item_url'),
+  };
+}
+
+const MAX_MENU_DEPTH = 10;
+
+export function buildPreviewMenus({
+  terms,
+  rawItems,
+  postsByWpId,
+  pagesByWpId,
+  categoriesByWpId,
+  tagsByWpId,
+  sourceOrigin,
+  report,
+}) {
+  if (rawItems.length === 0) {
+    return {};
+  }
+
+  const assignedItems = [];
+  for (const item of rawItems) {
+    if (item.menuSlugs.length === 0) {
+      addWarning(report, 'skipped_menu_items', item.wpId);
+    } else {
+      assignedItems.push(item);
+    }
+  }
+  if (assignedItems.length === 0) {
+    return {};
+  }
+
+  const activeMenuSlugs = new Set(assignedItems.flatMap((item) => item.menuSlugs));
+  const discoveredTermSlugs = new Set(terms.map((term) => term.slug));
+  for (const slug of activeMenuSlugs) {
+    if (!discoveredTermSlugs.has(slug)) {
+      terms.push({
+        slug,
+        name: slug,
+        order: terms.length,
+      });
+    }
+  }
+
+  const menuIdBySlug = buildMenuIdAssignments(terms, activeMenuSlugs);
+  const termBySlug = new Map(terms.map((term) => [term.slug, term]));
+  const menus = {};
+
+  for (const [menuSlug, menuId] of menuIdBySlug) {
+    const menuRawItems = assignedItems
+      .filter((item) => item.menuSlugs.includes(menuSlug))
+      .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
+    const convertedByWpId = new Map();
+    const parentByWpId = new Map();
+
+    for (const raw of menuRawItems) {
+      const converted = convertMenuItem(raw, {
+        postsByWpId,
+        pagesByWpId,
+        categoriesByWpId,
+        tagsByWpId,
+        sourceOrigin,
+        report,
+      });
+      if (!converted) {
+        continue;
+      }
+      convertedByWpId.set(raw.wpId, converted);
+      parentByWpId.set(raw.wpId, raw.parentWpId);
+    }
+
+    const tree = buildMenuTree({ menuRawItems, convertedByWpId, parentByWpId, report });
+
+    if (tree.length === 0) {
+      continue;
+    }
+
+    const term = termBySlug.get(menuSlug);
+    menus[menuId] = {
+      name: term?.name || menuSlug,
+      items: tree,
+    };
+  }
+
+  return menus;
+}
+
+function navMenuSlugsForItem(item) {
+  return itemCategories(item, 'nav_menu')
+    .map((category) => normalizeSlugSegment(category.nicename ?? ''))
+    .filter(Boolean);
+}
+
+function convertMenuItem(raw, { postsByWpId, pagesByWpId, categoriesByWpId, tagsByWpId, sourceOrigin, report }) {
+  const explicitTitle = raw.title.trim();
+  const fallbackUrl = normalizeMenuUrl(raw.url, sourceOrigin);
+
+  if (raw.itemType === 'custom') {
+    if (explicitTitle && fallbackUrl) {
+      return menuItem(explicitTitle, fallbackUrl, raw.target);
+    }
+  }
+
+  if (raw.itemType === 'post_type' && raw.objectType === 'post') {
+    const post = postsByWpId.get(raw.objectId);
+    if (post) {
+      const converted = menuItem(explicitTitle || post.title, null, raw.target, post.url);
+      if (converted) {
+        return converted;
+      }
+    }
+  }
+
+  if (raw.itemType === 'post_type' && raw.objectType === 'page') {
+    const page = pagesByWpId.get(raw.objectId);
+    if (page) {
+      const converted = menuItem(explicitTitle || page.title, null, raw.target, page.url);
+      if (converted) {
+        return converted;
+      }
+    }
+  }
+
+  if (raw.itemType === 'taxonomy' && raw.objectType === 'category') {
+    const category = categoriesByWpId.get(raw.objectId);
+    if (category) {
+      const converted = menuItem(explicitTitle || category.name, null, raw.target, category.url);
+      if (converted) {
+        return converted;
+      }
+    }
+  }
+
+  if (raw.itemType === 'taxonomy' && raw.objectType === 'post_tag') {
+    const tag = tagsByWpId.get(raw.objectId);
+    if (tag) {
+      const converted = menuItem(explicitTitle || tag.name, null, raw.target, tag.url);
+      if (converted) {
+        return converted;
+      }
+    }
+  }
+
+  if (fallbackUrl && explicitTitle) {
+    return menuItem(explicitTitle, fallbackUrl, raw.target);
+  }
+
+  addWarning(report, 'skipped_menu_items', raw.wpId);
+  return null;
+}
+
+function buildMenuTree({ menuRawItems, convertedByWpId, parentByWpId, report }) {
+  const orderedWpIds = [];
+  const seenWpIds = new Set();
+  for (const raw of menuRawItems) {
+    if (!convertedByWpId.has(raw.wpId) || seenWpIds.has(raw.wpId)) {
+      continue;
+    }
+    seenWpIds.add(raw.wpId);
+    orderedWpIds.push(raw.wpId);
+  }
+
+  for (const wpId of orderedWpIds) {
+    const parentWpId = parentByWpId.get(wpId);
+    if (!parentWpId || parentWpId === '0') {
+      parentByWpId.set(wpId, null);
+      continue;
+    }
+    if (!convertedByWpId.has(parentWpId)) {
+      parentByWpId.set(wpId, null);
+      addWarning(report, 'orphan_menu_parents', wpId);
+    }
+  }
+
+  const cyclicWpIds = findCyclicNodesAndDescendants(orderedWpIds, parentByWpId);
+  for (const wpId of orderedWpIds) {
+    if (cyclicWpIds.has(wpId)) {
+      addWarning(report, 'discarded_cyclic_menu_items', wpId);
+    }
+  }
+
+  const acyclicWpIds = orderedWpIds.filter((wpId) => !cyclicWpIds.has(wpId));
+  const depthByWpId = calculateMenuDepths(acyclicWpIds, parentByWpId);
+  const deepWpIds = new Set();
+  for (const wpId of acyclicWpIds) {
+    if (depthByWpId.get(wpId) > MAX_MENU_DEPTH) {
+      deepWpIds.add(wpId);
+      addWarning(report, 'discarded_deep_menu_items', wpId);
+    }
+  }
+
+  const retainedWpIds = new Set(
+    acyclicWpIds.filter((wpId) => !deepWpIds.has(wpId)),
+  );
+  const tree = [];
+  for (const wpId of orderedWpIds) {
+    if (!retainedWpIds.has(wpId)) {
+      continue;
+    }
+
+    const converted = convertedByWpId.get(wpId);
+    const parentWpId = parentByWpId.get(wpId);
+    if (parentWpId && retainedWpIds.has(parentWpId)) {
+      convertedByWpId.get(parentWpId).children.push(converted);
+    } else {
+      tree.push(converted);
+    }
+  }
+  return tree;
+}
+
+function findCyclicNodesAndDescendants(orderedWpIds, parentByWpId) {
+  const safeWpIds = new Set();
+  const cyclicWpIds = new Set();
+
+  for (const startWpId of orderedWpIds) {
+    if (safeWpIds.has(startWpId) || cyclicWpIds.has(startWpId)) {
+      continue;
+    }
+
+    const path = [];
+    const pathIndexByWpId = new Map();
+    let currentWpId = startWpId;
+    let reachesCycle = false;
+
+    while (currentWpId) {
+      if (cyclicWpIds.has(currentWpId)) {
+        reachesCycle = true;
+        break;
+      }
+      if (safeWpIds.has(currentWpId)) {
+        break;
+      }
+      if (pathIndexByWpId.has(currentWpId)) {
+        reachesCycle = true;
+        break;
+      }
+
+      pathIndexByWpId.set(currentWpId, path.length);
+      path.push(currentWpId);
+      currentWpId = parentByWpId.get(currentWpId) || null;
+    }
+
+    const destination = reachesCycle ? cyclicWpIds : safeWpIds;
+    for (const wpId of path) {
+      destination.add(wpId);
+    }
+  }
+
+  return cyclicWpIds;
+}
+
+function calculateMenuDepths(orderedWpIds, parentByWpId) {
+  const depthByWpId = new Map();
+
+  for (const startWpId of orderedWpIds) {
+    if (depthByWpId.has(startWpId)) {
+      continue;
+    }
+
+    const path = [];
+    let currentWpId = startWpId;
+    while (currentWpId && !depthByWpId.has(currentWpId)) {
+      path.push(currentWpId);
+      currentWpId = parentByWpId.get(currentWpId) || null;
+    }
+
+    let depth = currentWpId ? depthByWpId.get(currentWpId) : 0;
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      depth += 1;
+      depthByWpId.set(path[index], depth);
+    }
+  }
+
+  return depthByWpId;
+}
+
+function menuItem(title, url, target, fallbackUrl = null) {
+  const resolvedUrl = url || fallbackUrl;
+  if (!title || !resolvedUrl) {
+    return null;
+  }
+  return {
+    title,
+    url: resolvedUrl,
+    target,
+    children: [],
+  };
+}
+
+function normalizeMenuUrl(rawUrl, sourceOrigin) {
+  const trimmed = String(rawUrl ?? '').trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('#')) {
+    return `/${trimmed}`;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    if (sourceOrigin && parsed.origin === sourceOrigin) {
+      return `${parsed.pathname || '/'}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function buildMenuIdAssignments(terms, activeSlugs) {
+  const assignments = new Map();
+  const used = new Set();
+  const activeTerms = terms.filter((term) => activeSlugs.has(term.slug));
+  const primaryTerm = activeTerms.find((term) => isPreferredPrimaryMenu(term.slug, term.name)) ?? activeTerms[0];
+  const footerTerm = activeTerms.find((term) => term !== primaryTerm && isPreferredFooterMenu(term.slug, term.name));
+
+  const assign = (term, preferredId) => {
+    let candidate = preferredId;
+    if (used.has(candidate)) {
+      candidate = normalizeMenuId(term.slug || term.name, `menu-${term.order + 1}`);
+    }
+
+    let unique = candidate;
+    let suffix = 2;
+    while (used.has(unique)) {
+      unique = `${candidate.slice(0, 60)}-${suffix}`.slice(0, 64);
+      suffix += 1;
+    }
+
+    used.add(unique);
+    assignments.set(term.slug, unique);
+  };
+
+  if (primaryTerm) {
+    assign(primaryTerm, 'primary');
+  }
+  if (footerTerm) {
+    assign(footerTerm, 'footer');
+  }
+  for (const term of activeTerms) {
+    if (!assignments.has(term.slug)) {
+      assign(term, normalizeMenuId(term.slug || term.name, `menu-${term.order + 1}`));
+    }
+  }
+
+  return assignments;
+}
+
+function normalizeMenuId(value, fallback) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+
+  if (/^[a-z][a-z0-9_-]{0,63}$/.test(normalized)) {
+    return normalized;
+  }
+
+  const fallbackId = String(fallback ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 59);
+
+  return `menu-${fallbackId || 'imported'}`.slice(0, 64);
+}
+
+function isPreferredPrimaryMenu(slug, name) {
+  const value = `${slug} ${name}`.toLowerCase();
+  return /\b(primary|main|menu-1|topmenu|top-menu|header|navigation|nav)\b/.test(value);
+}
+
+function isPreferredFooterMenu(slug, name) {
+  const value = `${slug} ${name}`.toLowerCase();
+  return /\b(footer|bottom)\b/.test(value);
+}

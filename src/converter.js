@@ -5,6 +5,7 @@ import {
 import {
   createBaseWidgets,
   createResolvedBase,
+  createResolvedWordPressComments,
   inferMediaOriginFromImport,
   normalizeBase,
   PERMALINK_FIELDS,
@@ -59,17 +60,6 @@ const SEO_DESCRIPTION_META_KEYS = Object.freeze([
   '_aioseo_description',
   '_genesis_description',
 ]);
-const DEFAULT_WORDPRESS_COMMENTS = Object.freeze({
-  enabled: true,
-  provider: 'wordpress',
-  per_page: 50,
-  order: 'desc',
-  threading: Object.freeze({
-    enabled: true,
-    max_depth: 2,
-  }),
-});
-
 export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   const baseData = normalizeBase(base);
   const widgets = createBaseWidgets(baseData.widgets);
@@ -521,24 +511,7 @@ function createSiteComments({ baseComments, channel, report }) {
     apiBaseUrl = baseComments.api_base_url;
   }
 
-  const resolved = {
-    ...DEFAULT_WORDPRESS_COMMENTS,
-    ...baseComments,
-    api_base_url: apiBaseUrl,
-    threading: {
-      ...DEFAULT_WORDPRESS_COMMENTS.threading,
-      ...baseComments?.threading,
-    },
-  };
-
-  return {
-    enabled: resolved.enabled,
-    api_base_url: resolved.api_base_url,
-    provider: resolved.provider,
-    per_page: resolved.per_page,
-    order: resolved.order,
-    threading: resolved.threading,
-  };
+  return createResolvedWordPressComments(baseComments, apiBaseUrl);
 }
 
 function inferWordPressCommentsApiBaseUrl(channel) {

@@ -1,4 +1,5 @@
 import { isSafeSlugSegment } from '@zeropress/slug-policy';
+import { validatePreviewData } from '@zeropress/preview-data-validator';
 import { canonicalizeTimeZone } from './time.js';
 import {
   hasCredentialAuthority,
@@ -11,6 +12,10 @@ import {
 
 const BASE_SCHEMA_REFERENCE = 'https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json';
 const CUSTOM_HTML_SLOT_MAX_CODE_POINTS = 65536;
+const BASE_PREFLIGHT_DEFERRED_ERROR_CODES = new Set([
+  'INVALID_COLLECTION_ITEM_REFERENCE',
+  'INVALID_FRONT_PAGE_PAGE_REFERENCE',
+]);
 const BASE_TOP_LEVEL_KEYS = new Set([
   '$schema', 'version', 'site', 'meta', 'newsletter', 'comments', 'widgets', 'collections', 'custom_css', 'custom_html', 'import',
 ]);
@@ -90,11 +95,42 @@ const DEFAULT_WIDGETS = Object.freeze({
     ]),
   }),
 });
+const DEFAULT_WORDPRESS_COMMENTS = Object.freeze({
+  enabled: true,
+  provider: 'wordpress',
+  per_page: 50,
+  order: 'desc',
+  threading: Object.freeze({
+    enabled: true,
+    max_depth: 2,
+  }),
+});
 
 export function createBaseWidgets(value) {
   return value === undefined
     ? structuredClone(DEFAULT_WIDGETS)
     : structuredClone(value);
+}
+
+export function createResolvedWordPressComments(baseComments, apiBaseUrl) {
+  const resolved = {
+    ...DEFAULT_WORDPRESS_COMMENTS,
+    ...baseComments,
+    api_base_url: apiBaseUrl,
+    threading: {
+      ...DEFAULT_WORDPRESS_COMMENTS.threading,
+      ...baseComments?.threading,
+    },
+  };
+
+  return {
+    enabled: resolved.enabled,
+    api_base_url: resolved.api_base_url,
+    provider: resolved.provider,
+    per_page: resolved.per_page,
+    order: resolved.order,
+    threading: resolved.threading,
+  };
 }
 
 export function createResolvedBase({ baseData, site, widgets, configuredMediaOrigin }) {
@@ -184,6 +220,7 @@ export function normalizeBase(base) {
   }
   if (normalizedImport !== undefined) normalized.import = normalizedImport;
   if (normalizedComments !== undefined) normalized.comments = normalizedComments;
+  validateBasePreviewShape(normalized);
   return normalized;
 }
 
@@ -321,6 +358,65 @@ function validateBaseNewsletter(newsletter) {
   validateOptionalBoolean(newsletter.enabled, 'newsletter.enabled');
   for (const key of ['title', 'description', 'button_label', 'signup_url', 'embed_url']) {
     validateOptionalString(newsletter[key], `newsletter.${key}`);
+  }
+}
+
+function validateBasePreviewShape(baseData) {
+  const site = {
+    title: 'WordPress Import',
+    description: '',
+    url: '',
+    media_origin: '',
+    locale: 'en',
+    posts_per_page: 10,
+    date_style: 'medium',
+    time_style: 'short',
+    timezone: 'UTC',
+    ...baseData.site,
+  };
+
+  if (baseData.meta !== undefined) {
+    site.meta = structuredClone(baseData.meta);
+  }
+  if (baseData.newsletter !== undefined) {
+    site.newsletter = structuredClone(baseData.newsletter);
+  }
+  if (baseData.comments !== undefined) {
+    site.comments = createResolvedWordPressComments(
+      baseData.comments,
+      baseData.comments.api_base_url,
+    );
+  }
+
+  const previewData = {
+    version: '0.7',
+    generator: 'zeropress-wxr-import base preflight',
+    generated_at: '2000-01-01T00:00:00Z',
+    site,
+    content: {
+      authors: [],
+      posts: [],
+      pages: [],
+      categories: [],
+      tags: [],
+    },
+    widgets: createBaseWidgets(baseData.widgets),
+    ...(baseData.collections !== undefined
+      ? { collections: structuredClone(baseData.collections) }
+      : {}),
+    ...(baseData.custom_css !== undefined
+      ? { custom_css: structuredClone(baseData.custom_css) }
+      : {}),
+    ...(baseData.custom_html !== undefined
+      ? { custom_html: structuredClone(baseData.custom_html) }
+      : {}),
+  };
+  const validation = validatePreviewData(previewData);
+  const first = validation.errors.find(
+    (error) => !BASE_PREFLIGHT_DEFERRED_ERROR_CODES.has(error.code),
+  );
+  if (first) {
+    throw new Error(`Invalid base JSON: ${first.code} ${first.path}: ${first.message}`);
   }
 }
 

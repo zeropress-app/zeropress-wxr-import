@@ -190,6 +190,13 @@ The canonical base schema is published at:
 https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json
 ```
 
+Before reading WXR, the importer validates every base value that is copied to
+Preview Data against the Preview Data v0.7 contract. This includes nested
+favicon, logo, front-page, post-index, footer, metadata, newsletter, widget,
+collection, CSS, and HTML shapes. A front-page or collection item's reference
+to imported content is structurally checked during this preflight; whether the
+referenced Page or Post exists is checked after WXR content has been read.
+
 The importer replaces WXR-owned preview-data sections:
 
 - `content.authors`
@@ -303,7 +310,13 @@ of enabled; a legacy boolean, an empty object, and extra fields are rejected.
 `site.disallow_comments` is not supported. `meta` is copied to `site.meta`
 without interpreting or reserving particular keys. Comment-like keys under
 `meta` remain ordinary metadata and do not configure the importer; comment API
-configuration belongs in the top-level `comments` object.
+configuration belongs in the top-level `comments` object. Metadata values must
+be strings, numbers, booleans, or `null`; nested objects and arrays are
+rejected.
+
+`newsletter` uses the canonical Preview Data newsletter shape and requires an
+explicit `enabled` boolean. When `enabled` is `true`, provide at least one safe
+`signup_url` or `embed_url`.
 
 The WXR bridge always uses the `wordpress` provider. If a `comments` object is
 provided, `api_base_url` is required. Other omitted fields are materialized

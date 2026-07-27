@@ -240,6 +240,72 @@ test('base validator checks nested types, enums, ranges, and closed objects befo
   }
 });
 
+test('base preflight rejects invalid preview-data passthrough fields without reading WXR', async () => {
+  const invalidBases = [
+    [{ site: { title: '' } }, /INVALID_SITE_TITLE site\.title/],
+    [{ site: { favicon: {} } }, /INVALID_SITE_FAVICON site\.favicon/],
+    [{ site: { logo: { alt: 'Missing source' } } }, /MISSING_REQUIRED_PROPERTY site\.logo\.src/],
+    [{ site: { front_page: { type: 'page' } } }, /INVALID_FRONT_PAGE_PAGE_PATH site\.front_page\.page_path/],
+    [{ site: { post_index: { path: 'posts' } } }, /INVALID_POST_INDEX_PATH site\.post_index\.path/],
+    [{ site: { footer: { attribution: 'yes' } } }, /INVALID_SITE_FOOTER_ATTRIBUTION site\.footer\.attribution/],
+    [{ meta: { nested: { value: true } } }, /INVALID_META_VALUE site\.meta\.nested/],
+    [{ newsletter: { enabled: true } }, /INVALID_SITE_NEWSLETTER_URL site\.newsletter/],
+    [{
+      widgets: {
+        sidebar: {
+          name: 'Sidebar',
+          items: 'not-an-array',
+        },
+      },
+    }, /INVALID_WIDGET_AREA_ITEMS widgets\.sidebar\.items/],
+    [{
+      collections: {
+        featured: {
+          title: 'Featured',
+        },
+      },
+    }, /MISSING_REQUIRED_PROPERTY collections\.featured\.items/],
+  ];
+
+  for (const [base, expected] of invalidBases) {
+    let readCount = 0;
+    const unreadWxr = {
+      async *[Symbol.asyncIterator]() {
+        readCount += 1;
+        throw new Error('WXR source must not be read during base preflight');
+      },
+    };
+
+    await assert.rejects(
+      () => convertWxrToPreviewData(unreadWxr, { version: '0.7', ...base }),
+      expected,
+    );
+    assert.equal(readCount, 0);
+  }
+});
+
+test('base preflight defers imported content references to final validation', async () => {
+  await assert.rejects(
+    () => convert('', {
+      site: {
+        front_page: { type: 'page', page_path: 'missing' },
+      },
+    }),
+    /INVALID_FRONT_PAGE_PAGE_REFERENCE site\.front_page\.page_path/,
+  );
+
+  await assert.rejects(
+    () => convert('', {
+      collections: {
+        featured: {
+          items: [{ type: 'post', slug: 'missing' }],
+        },
+      },
+    }),
+    /INVALID_COLLECTION_ITEM_REFERENCE collections\.featured\.items\[0\]\.slug/,
+  );
+});
+
 test('base validator requires the v0.7 contract version', async () => {
   const source = Readable.from([wxrDocument('')]);
   await assert.rejects(

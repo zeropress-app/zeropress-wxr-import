@@ -94,6 +94,40 @@ test('CLI flushes complete stderr output before exiting on errors', async () => 
   assert.match(unsafe.stderr, /\\u202E/);
 });
 
+test('CLI rejects illegal menu URLs without writing output or helper artifacts', async (t) => {
+  const cases = [
+    ['/../secret', /path traversal segments/],
+    ['/foo\\bar', /backslashes are not allowed/],
+    ['/foo%ZZ', /malformed percent encoding is not allowed/],
+    ['https://user:password@external.example/private', /URL credentials are not allowed/],
+  ];
+
+  for (const [url, reason] of cases) {
+    const fixture = await makeFixture(t, unsafeMenuWxr(url));
+    const result = await executeCli(defaultArgs(), { cwd: fixture.root });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /^\[zeropress-wxr-import\] Invalid WXR menu URL:/);
+    assert.match(result.stderr, /menu "Main Menu"/);
+    assert.match(result.stderr, /item ID "201"/);
+    assert.match(result.stderr, /title "Bad Link"/);
+    assert.match(result.stderr, reason);
+    assert.equal(result.stderr.includes(`URL ${JSON.stringify(url)}`), true);
+
+    for (const artifact of [
+      fixture.output,
+      fixture.baseArtifact,
+      fixture.reportArtifact,
+    ]) {
+      await assert.rejects(
+        () => fs.access(artifact),
+        (error) => error?.code === 'ENOENT',
+      );
+    }
+  }
+});
+
 test('CLI removes malformed UTF-8 bytes without replacing a valid encoded U+FFFD', async (t) => {
   const [beforeTitle, afterTitle] = minimalWxr().split('Minimal Site');
   const input = Buffer.concat([
@@ -431,6 +465,30 @@ function minimalWxr() {
       <wp:post_type><![CDATA[post]]></wp:post_type>
       <wp:status><![CDATA[publish]]></wp:status>
       <wp:comment_status><![CDATA[open]]></wp:comment_status>
+    </item>`);
+}
+
+function unsafeMenuWxr(url) {
+  return wxrDocument(`
+    <wp:term>
+      <wp:term_slug>main-menu</wp:term_slug>
+      <wp:term_name>Main Menu</wp:term_name>
+      <wp:term_taxonomy>nav_menu</wp:term_taxonomy>
+    </wp:term>
+    <item>
+      <title><![CDATA[Bad Link]]></title>
+      <wp:post_id>201</wp:post_id>
+      <wp:post_type>nav_menu_item</wp:post_type>
+      <wp:status>publish</wp:status>
+      <category domain="nav_menu" nicename="main-menu">Main Menu</category>
+      <wp:postmeta>
+        <wp:meta_key>_menu_item_type</wp:meta_key>
+        <wp:meta_value>custom</wp:meta_value>
+      </wp:postmeta>
+      <wp:postmeta>
+        <wp:meta_key>_menu_item_url</wp:meta_key>
+        <wp:meta_value><![CDATA[${url}]]></wp:meta_value>
+      </wp:postmeta>
     </item>`);
 }
 

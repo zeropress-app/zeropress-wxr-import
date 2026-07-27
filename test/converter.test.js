@@ -172,11 +172,25 @@ test('normalizes same-origin custom menu URLs to root-relative URLs', async () =
   assert.equal(previewData.menus.primary.items[2].url, 'https://external.example/path/');
 });
 
-test('removes unsafe menu URLs', async () => {
-  const { previewData, report } = await convert(sampleWxrWithUnsafeMenu(), base());
-
-  assert.equal(previewData.menus, undefined);
-  assert.deepEqual(report.warnings.skipped_menu_items, { count: 1, affected: ['201'] });
+test('fails the complete conversion for illegal menu URLs', async () => {
+  for (const url of [
+    '/../secret',
+    '/foo\\bar',
+    '/foo%ZZ',
+    'https://user:password@external.example/private',
+  ]) {
+    await assert.rejects(
+      () => convert(sampleWxrWithUnsafeMenu(url), base()),
+      (error) => {
+        assert.match(error.message, /^Invalid WXR menu URL:/);
+        assert.match(error.message, /menu "Main Menu"/);
+        assert.match(error.message, /item ID "201"/);
+        assert.match(error.message, /title "Bad Link"/);
+        assert.equal(error.message.includes(`URL ${JSON.stringify(url)}`), true);
+        return true;
+      },
+    );
+  }
 });
 
 test('rejects generated sections in base files', async () => {
@@ -444,7 +458,7 @@ function sampleWxr() {
 </rss>`;
 }
 
-function sampleWxrWithUnsafeMenu() {
+function sampleWxrWithUnsafeMenu(url) {
   return `<?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0" xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/" xmlns:wp="http://wordpress.org/export/1.2/">
   <channel>
@@ -463,7 +477,7 @@ function sampleWxrWithUnsafeMenu() {
       <wp:status><![CDATA[publish]]></wp:status>
       <category domain="nav_menu" nicename="main-menu"><![CDATA[Main Menu]]></category>
       <wp:postmeta><wp:meta_key><![CDATA[_menu_item_type]]></wp:meta_key><wp:meta_value><![CDATA[custom]]></wp:meta_value></wp:postmeta>
-      <wp:postmeta><wp:meta_key><![CDATA[_menu_item_url]]></wp:meta_key><wp:meta_value><![CDATA[javascript:alert(1)]]></wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key><![CDATA[_menu_item_url]]></wp:meta_key><wp:meta_value><![CDATA[${url}]]></wp:meta_value></wp:postmeta>
     </item>
   </channel>
 </rss>`;

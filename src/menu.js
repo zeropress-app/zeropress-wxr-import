@@ -1,5 +1,6 @@
 import { addWarning } from './report.js';
 import { normalizeSlugSegment } from './slug.js';
+import { resolveNavigationUrl } from './url.js';
 import { itemCategories, postMetaValue, wpText } from './xml.js';
 
 export function extractNavMenuTerms(doc) {
@@ -62,6 +63,10 @@ export function buildPreviewMenus({
   const assignedItems = [];
   for (const item of rawItems) {
     if (item.menuSlugs.length === 0) {
+      normalizeMenuUrl(item.url, sourceOrigin, {
+        menuName: '(unassigned)',
+        raw: item,
+      });
       addWarning(report, 'skipped_menu_items', item.wpId);
     } else {
       assignedItems.push(item);
@@ -88,6 +93,8 @@ export function buildPreviewMenus({
   const menus = {};
 
   for (const [menuSlug, menuId] of menuIdBySlug) {
+    const term = termBySlug.get(menuSlug);
+    const menuName = term?.name || menuSlug;
     const menuRawItems = assignedItems
       .filter((item) => item.menuSlugs.includes(menuSlug))
       .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
@@ -102,6 +109,7 @@ export function buildPreviewMenus({
         tagsByWpId,
         sourceOrigin,
         report,
+        menuName,
       });
       if (!converted) {
         continue;
@@ -116,9 +124,8 @@ export function buildPreviewMenus({
       continue;
     }
 
-    const term = termBySlug.get(menuSlug);
     menus[menuId] = {
-      name: term?.name || menuSlug,
+      name: menuName,
       items: tree,
     };
   }
@@ -132,9 +139,17 @@ function navMenuSlugsForItem(item) {
     .filter(Boolean);
 }
 
-function convertMenuItem(raw, { postsByWpId, pagesByWpId, categoriesByWpId, tagsByWpId, sourceOrigin, report }) {
+function convertMenuItem(raw, {
+  postsByWpId,
+  pagesByWpId,
+  categoriesByWpId,
+  tagsByWpId,
+  sourceOrigin,
+  report,
+  menuName,
+}) {
   const explicitTitle = raw.title.trim();
-  const fallbackUrl = normalizeMenuUrl(raw.url, sourceOrigin);
+  const fallbackUrl = normalizeMenuUrl(raw.url, sourceOrigin, { menuName, raw });
 
   if (raw.itemType === 'custom') {
     if (explicitTitle && fallbackUrl) {
@@ -329,30 +344,22 @@ function menuItem(title, url, target, fallbackUrl = null) {
   };
 }
 
-function normalizeMenuUrl(rawUrl, sourceOrigin) {
-  const trimmed = String(rawUrl ?? '').trim();
-  if (!trimmed) {
-    return null;
+function normalizeMenuUrl(rawUrl, sourceOrigin, context) {
+  const { url, reason } = resolveNavigationUrl(rawUrl, sourceOrigin);
+  if (reason) {
+    throw invalidMenuUrlError(context, rawUrl, reason);
   }
-  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
-    return trimmed;
-  }
-  if (trimmed.startsWith('#')) {
-    return `/${trimmed}`;
-  }
+  return url;
+}
 
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
-    if (sourceOrigin && parsed.origin === sourceOrigin) {
-      return `${parsed.pathname || '/'}${parsed.search}${parsed.hash}`;
-    }
-    return parsed.href;
-  } catch {
-    return null;
-  }
+function invalidMenuUrlError({ menuName, raw }, rawUrl, reason) {
+  return new Error(
+    'Invalid WXR menu URL: '
+    + `menu ${JSON.stringify(String(menuName ?? ''))}, `
+    + `item ID ${JSON.stringify(String(raw.wpId ?? ''))}, `
+    + `title ${JSON.stringify(String(raw.title ?? ''))}, `
+    + `URL ${JSON.stringify(String(rawUrl ?? ''))}: ${reason}`,
+  );
 }
 
 function buildMenuIdAssignments(terms, activeSlugs) {

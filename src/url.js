@@ -10,6 +10,7 @@ const HTTP_SCHEME_REGEX = /^https?:\/\//iu;
 const UNSAFE_CHARACTER_REGEX = /[\s\u0000-\u001F\u007F]/u;
 const MALFORMED_PERCENT_ESCAPE_REGEX = /%(?![0-9A-Fa-f]{2})/u;
 const CREDENTIAL_AUTHORITY_REGEX = /^https?:\/\/[^/?#]*@/iu;
+const URL_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/u;
 
 export function isHttpSchemeUrl(value) {
   return HTTP_SCHEME_REGEX.test(value);
@@ -72,6 +73,37 @@ export function parseSafeHttpUrl(value) {
 }
 
 /**
+ * Resolve a navigation URL to the Preview Data URL contract.
+ *
+ * Missing values are represented by `{ url: null, reason: null }`. Invalid
+ * non-empty values include a stable, user-facing rejection reason so callers
+ * can attach their own source context.
+ */
+export function resolveNavigationUrl(value, sourceOrigin = '') {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) {
+    return { url: null, reason: null };
+  }
+
+  const reason = navigationUrlRejectionReason(trimmed);
+  if (reason) {
+    return { url: null, reason };
+  }
+  if (trimmed.startsWith('#')) {
+    return { url: `/${trimmed}`, reason: null };
+  }
+  if (trimmed.startsWith('/')) {
+    return { url: trimmed, reason: null };
+  }
+
+  const parsed = parseSafeHttpUrl(trimmed);
+  const url = sourceOrigin && parsed.origin === sourceOrigin
+    ? `${parsed.pathname || '/'}${parsed.search}${parsed.hash}`
+    : parsed.href;
+  return { url, reason: null };
+}
+
+/**
  * Normalize an absolute HTTP(S) URL prefix to exactly one trailing slash,
  * preserving the caller's scheme and host spelling.
  *
@@ -103,4 +135,71 @@ export function normalizeHttpOrigin(value) {
     return null;
   }
   return parsed.origin;
+}
+
+function navigationUrlRejectionReason(value) {
+  if (value.includes('\\')) {
+    return 'backslashes are not allowed';
+  }
+  if (MALFORMED_PERCENT_ESCAPE_REGEX.test(value)) {
+    return 'malformed percent encoding is not allowed';
+  }
+  if (UNSAFE_CHARACTER_REGEX.test(value)) {
+    return 'whitespace and control characters are not allowed';
+  }
+  if (value.startsWith('//')) {
+    return 'protocol-relative URLs are not allowed';
+  }
+  if (value.startsWith('/') || value.startsWith('#')) {
+    return hasDotPathSegment(value)
+      ? 'path traversal segments "." and ".." are not allowed'
+      : null;
+  }
+  if (!URL_SCHEME_REGEX.test(value) || !isHttpSchemeUrl(value)) {
+    return 'only absolute HTTP(S) URLs and root-relative URLs are allowed';
+  }
+  if (hasDotPathSegment(value)) {
+    return 'path traversal segments "." and ".." are not allowed';
+  }
+  if (hasCredentialAuthority(value)) {
+    return 'URL credentials are not allowed';
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return 'expected an absolute HTTP(S) URL with a hostname';
+  }
+  if (parsed.username || parsed.password) {
+    return 'URL credentials are not allowed';
+  }
+  if (!parseSafeHttpUrl(value)) {
+    return 'expected an absolute HTTP(S) URL with a hostname';
+  }
+  return null;
+}
+
+function hasDotPathSegment(value) {
+  let rawPath;
+  if (URL_SCHEME_REGEX.test(value)) {
+    const authorityStart = value.indexOf('://') + 3;
+    const suffix = value.slice(authorityStart);
+    const delimiterIndex = suffix.search(/[/?#]/u);
+    rawPath = delimiterIndex === -1 || suffix[delimiterIndex] !== '/'
+      ? '/'
+      : suffix.slice(delimiterIndex).split(/[?#]/u, 1)[0];
+  } else {
+    rawPath = value.split(/[?#]/u, 1)[0];
+  }
+
+  return rawPath.split('/').some((segment) => {
+    if (segment === '') return false;
+    try {
+      const decoded = decodeURIComponent(segment);
+      return decoded === '.' || decoded === '..';
+    } catch {
+      return true;
+    }
+  });
 }

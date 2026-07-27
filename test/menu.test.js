@@ -95,6 +95,33 @@ test('records published menu items without a menu assignment as skipped', () => 
   assert.deepEqual(report.warnings.skipped_menu_items, { count: 1, affected: ['99'] });
 });
 
+test('rejects an illegal URL even when the menu item is unassigned', () => {
+  assert.throws(
+    () => buildPreviewMenus({
+      terms: [],
+      rawItems: [{
+        wpId: '98',
+        parentWpId: '0',
+        menuSlugs: [],
+        order: 0,
+        title: 'Unassigned unsafe URL',
+        itemType: 'custom',
+        objectType: '',
+        objectId: '',
+        target: '_self',
+        url: '/foo%ZZ',
+      }],
+      postsByWpId: new Map(),
+      pagesByWpId: new Map(),
+      categoriesByWpId: new Map(),
+      tagsByWpId: new Map(),
+      sourceOrigin: '',
+      report: createReport(),
+    }),
+    /menu "\(unassigned\)".*item ID "98".*malformed percent encoding/,
+  );
+});
+
 test('converts WordPress post_tag taxonomy menu items', () => {
   const report = createReport();
   const menus = buildMenus({
@@ -118,6 +145,57 @@ test('converts WordPress post_tag taxonomy menu items', () => {
     children: [],
   }]);
   assert.equal(report.warnings.skipped_menu_items.count, 0);
+});
+
+test('rejects illegal menu URLs with actionable item context', () => {
+  const cases = [
+    ['/../secret', /path traversal segments/],
+    ['/foo\\bar', /backslashes are not allowed/],
+    ['/foo%ZZ', /malformed percent encoding is not allowed/],
+    ['https://user:password@external.example/private', /URL credentials are not allowed/],
+    ['//external.example/path', /protocol-relative URLs are not allowed/],
+    ['javascript:alert(1)', /only absolute HTTP\(S\) URLs and root-relative URLs are allowed/],
+  ];
+
+  for (const [url, reason] of cases) {
+    assert.throws(
+      () => buildMenus({
+        rawItems: [menuItem({
+          wpId: '41',
+          title: 'Unsafe destination',
+          url,
+        })],
+        report: createReport(),
+      }),
+      (error) => {
+        assert.match(error.message, /^Invalid WXR menu URL:/);
+        assert.match(error.message, /menu "Primary"/);
+        assert.match(error.message, /item ID "41"/);
+        assert.match(error.message, /title "Unsafe destination"/);
+        assert.match(error.message, reason);
+        assert.equal(error.message.includes(`URL ${JSON.stringify(url)}`), true);
+        return true;
+      },
+    );
+  }
+});
+
+test('keeps an empty custom menu URL in the incomplete-item warning path', () => {
+  const report = createReport();
+  const menus = buildMenus({
+    rawItems: [menuItem({
+      wpId: '42',
+      title: 'Missing destination',
+      url: '',
+    })],
+    report,
+  });
+
+  assert.deepEqual(menus, {});
+  assert.deepEqual(report.warnings.skipped_menu_items, {
+    count: 1,
+    affected: ['42'],
+  });
 });
 
 test('promotes an item with a missing parent to the menu root', () => {
@@ -202,6 +280,7 @@ function menuItem({
   itemType = 'custom',
   objectType = '',
   objectId = '',
+  url = itemType === 'custom' ? `/menu/${wpId}` : '',
 }) {
   return {
     wpId,
@@ -213,7 +292,6 @@ function menuItem({
     objectType,
     objectId,
     target: '_self',
-    url: itemType === 'custom' ? `/menu/${wpId}` : '',
+    url,
   };
 }
-

@@ -452,6 +452,14 @@ Successful automatic inference is also recorded as
 - Datetimes are emitted as UTC seconds: `YYYY-MM-DDTHH:mm:ssZ`.
 - Custom menu URLs on the WXR source origin become root-relative URLs. External
   HTTP(S) URLs are preserved.
+- Every non-empty WXR menu URL must be a credential-free absolute HTTP(S) URL
+  or a safe single-slash root-relative URL. Illegal values fail the complete
+  conversion instead of being silently removed. This includes path traversal
+  such as `/../secret`, backslashes such as `/foo\bar`, malformed percent
+  encoding such as `/foo%ZZ`, protocol-relative or non-HTTP(S) URLs, and
+  absolute URLs containing credentials. The error identifies the menu, item
+  ID, title, URL, and rejection reason. No output or helper artifact is
+  committed when this validation fails.
 
 ### Locale
 
@@ -560,6 +568,10 @@ Defined warning codes include:
 - `locale_inference_skipped`
 - `timezone_inference_skipped`
 - `timezone_inference_ambiguous`
+
+`skipped_menu_items` covers incomplete or unresolved menu items, such as a
+missing title, missing URL, or missing referenced content. It is not used for a
+non-empty illegal URL; that input fails the conversion as described above.
 
 Media-prefix inference warnings identify attachment records as
 `attachment:<wordpress-id>` (or `item:<channel-index>` when the attachment ID is

@@ -941,39 +941,73 @@ function allocateAuthorId({ candidate, wpId, usedAuthorIds }) {
 }
 
 function extractCategories(doc) {
-  const categories = new Map();
-  for (const entry of doc.categories) {
-    const slug = normalizeSlugSegment(wpText(entry, 'category_nicename') || wpText(entry, 'cat_name'));
-    const name = wpText(entry, 'cat_name') || slug;
-    if (!slug || !name) {
-      continue;
-    }
-    categories.set(slug, {
-      wpId: wpText(entry, 'term_id'),
-      name,
-      slug,
-      description: wpText(entry, 'category_description'),
-    });
-  }
-  return categories;
+  return extractTaxonomyTerms(doc.categories, {
+    taxonomy: 'category',
+    slugField: 'category_nicename',
+    nameField: 'cat_name',
+    descriptionField: 'category_description',
+  });
 }
 
 function extractTags(doc) {
-  const tags = new Map();
-  for (const entry of doc.tags) {
-    const slug = normalizeSlugSegment(wpText(entry, 'tag_slug') || wpText(entry, 'tag_name'));
-    const name = wpText(entry, 'tag_name') || slug;
+  return extractTaxonomyTerms(doc.tags, {
+    taxonomy: 'tag',
+    slugField: 'tag_slug',
+    nameField: 'tag_name',
+    descriptionField: 'tag_description',
+  });
+}
+
+function extractTaxonomyTerms(entries, {
+  taxonomy,
+  slugField,
+  nameField,
+  descriptionField,
+}) {
+  const terms = new Map();
+  const sourcesBySlug = new Map();
+
+  for (const entry of entries) {
+    const rawSlug = wpText(entry, slugField);
+    const rawName = wpText(entry, nameField);
+    const slug = normalizeSlugSegment(rawSlug || rawName);
+    const name = rawName || slug;
     if (!slug || !name) {
       continue;
     }
-    tags.set(slug, {
+
+    const source = {
       wpId: wpText(entry, 'term_id'),
       name,
+      rawSlug,
+    };
+    const previousSource = sourcesBySlug.get(slug);
+    if (previousSource) {
+      throw new Error(
+        `Invalid WXR taxonomy slug collision: ${taxonomy} terms `
+        + `${formatTaxonomyTermSource(previousSource)} and ${formatTaxonomyTermSource(source)} `
+        + `both normalize to ${JSON.stringify(slug)}. Rename one of these terms in WordPress, `
+        + 'then export the WXR again.',
+      );
+    }
+
+    sourcesBySlug.set(slug, source);
+    terms.set(slug, {
+      wpId: source.wpId,
+      name,
       slug,
-      description: wpText(entry, 'tag_description'),
+      description: wpText(entry, descriptionField),
     });
   }
-  return tags;
+  return terms;
+}
+
+function formatTaxonomyTermSource({ wpId, rawSlug, name }) {
+  const id = wpId ? `ID ${JSON.stringify(wpId)}` : 'without a term ID';
+  const slug = rawSlug
+    ? JSON.stringify(rawSlug)
+    : '(missing; using the term name as fallback)';
+  return `${id} (slug ${slug}, name ${JSON.stringify(name)})`;
 }
 
 /**

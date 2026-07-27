@@ -1132,6 +1132,55 @@ test('tag term IDs resolve post_tag taxonomy menu URLs', async () => {
   assert.equal(previewData.menus.primary.items[0].url, '/topics/release/');
 });
 
+test('rejects category terms whose source slugs normalize to the same slug', async () => {
+  const xml = `
+    <wp:category><wp:term_id>12</wp:term_id><wp:category_nicename>.news</wp:category_nicename><wp:cat_name>Dot News</wp:cat_name></wp:category>
+    <wp:category><wp:term_id>34</wp:term_id><wp:category_nicename>news</wp:category_nicename><wp:cat_name>News</wp:cat_name></wp:category>`;
+
+  await assert.rejects(
+    () => convert(xml, { site: {} }),
+    {
+      message: 'Invalid WXR taxonomy slug collision: category terms '
+        + 'ID "12" (slug ".news", name "Dot News") and '
+        + 'ID "34" (slug "news", name "News") both normalize to "news". '
+        + 'Rename one of these terms in WordPress, then export the WXR again.',
+    },
+  );
+});
+
+test('rejects tag terms whose source slugs normalize to the same slug', async () => {
+  const xml = `
+    <wp:tag><wp:term_id>56</wp:term_id><wp:tag_slug>release...notes</wp:tag_slug><wp:tag_name>Release Dots</wp:tag_name></wp:tag>
+    <wp:tag><wp:term_id>78</wp:term_id><wp:tag_slug>release-notes</wp:tag_slug><wp:tag_name>Release Notes</wp:tag_name></wp:tag>`;
+
+  await assert.rejects(
+    () => convert(xml, { site: {} }),
+    {
+      message: 'Invalid WXR taxonomy slug collision: tag terms '
+        + 'ID "56" (slug "release...notes", name "Release Dots") and '
+        + 'ID "78" (slug "release-notes", name "Release Notes") '
+        + 'both normalize to "release-notes". Rename one of these terms in WordPress, '
+        + 'then export the WXR again.',
+    },
+  );
+});
+
+test('allows category and tag terms to share the same normalized slug', async () => {
+  const xml = `
+    <wp:category><wp:term_id>12</wp:term_id><wp:category_nicename>.news</wp:category_nicename><wp:cat_name>Category News</wp:cat_name></wp:category>
+    <wp:tag><wp:term_id>34</wp:term_id><wp:tag_slug>news</wp:tag_slug><wp:tag_name>Tag News</wp:tag_name></wp:tag>`;
+  const { previewData } = await convert(xml, { site: {} });
+
+  assert.deepEqual(previewData.content.categories, [{
+    name: 'Category News',
+    slug: 'news',
+  }]);
+  assert.deepEqual(previewData.content.tags, [{
+    name: 'Tag News',
+    slug: 'news',
+  }]);
+});
+
 test('sorts global tags by name and slug while preserving each post WXR tag order', async () => {
   const xml = `
     <wp:tag><wp:term_id>30</wp:term_id><wp:tag_slug>zulu</wp:tag_slug><wp:tag_name>Zulu</wp:tag_name></wp:tag>

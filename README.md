@@ -451,6 +451,10 @@ Successful automatic inference is also recorded as
   affected Post or Page.
 - WXR categories, tags, authors, and nav menus are converted when possible.
   Taxonomy menu items support both categories and tags.
+- Category and tag slugs are normalized in separate taxonomy namespaces. If
+  two terms in the same taxonomy normalize to the same slug, the complete
+  conversion fails and identifies both terms instead of silently discarding
+  one. A category and tag may share the same normalized slug.
 - Each Post's `tag_slugs` preserves the order of its WXR
   `<category domain="post_tag">` elements and removes later occurrences of the
   same slug. The global `content.tags` catalog is instead sorted by name and

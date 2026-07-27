@@ -132,6 +132,29 @@ test('CLI rejects illegal menu URLs without writing output or helper artifacts',
   }
 });
 
+test('CLI rejects taxonomy slug collisions without writing output or helper artifacts', async (t) => {
+  const fixture = await makeFixture(t, taxonomySlugCollisionWxr());
+  const result = await executeCli(defaultArgs(), { cwd: fixture.root });
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /^\[zeropress-wxr-import\] Invalid WXR taxonomy slug collision:/);
+  assert.match(result.stderr, /category terms ID "12".*and ID "34"/);
+  assert.match(result.stderr, /both normalize to "news"/);
+  assert.match(result.stderr, /Rename one of these terms in WordPress/);
+
+  for (const artifact of [
+    fixture.output,
+    fixture.resolvedBaseArtifact,
+    fixture.reportArtifact,
+  ]) {
+    await assert.rejects(
+      () => fs.access(artifact),
+      (error) => error?.code === 'ENOENT',
+    );
+  }
+});
+
 test('CLI removes malformed UTF-8 bytes without replacing a valid encoded U+FFFD', async (t) => {
   const [beforeTitle, afterTitle] = minimalWxr().split('Minimal Site');
   const input = Buffer.concat([
@@ -514,6 +537,20 @@ function unsafeMenuWxr(url) {
         <wp:meta_value><![CDATA[${url}]]></wp:meta_value>
       </wp:postmeta>
     </item>`);
+}
+
+function taxonomySlugCollisionWxr() {
+  return wxrDocument(`
+    <wp:category>
+      <wp:term_id>12</wp:term_id>
+      <wp:category_nicename>.news</wp:category_nicename>
+      <wp:cat_name>Dot News</wp:cat_name>
+    </wp:category>
+    <wp:category>
+      <wp:term_id>34</wp:term_id>
+      <wp:category_nicename>news</wp:category_nicename>
+      <wp:cat_name>News</wp:cat_name>
+    </wp:category>`);
 }
 
 function mediaWxr() {

@@ -98,6 +98,55 @@ test('parser discards comments and unknown plugin metadata while retaining allow
   assert.equal(JSON.stringify(document).includes('discard me'), false);
 });
 
+test('parser releases selected item bodies after all item metadata has been parsed', async () => {
+  const inspected = [];
+  const document = await parseXml(stream(wxrDocument(`
+    <item>
+      <title>Draft</title>
+      <content:encoded><![CDATA[<p>Discarded content</p>]]></content:encoded>
+      <excerpt:encoded><![CDATA[Discarded excerpt]]></excerpt:encoded>
+      <wp:post_id>1</wp:post_id>
+      <wp:post_type>post</wp:post_type>
+      <wp:status>draft</wp:status>
+    </item>
+    <item>
+      <title>Published</title>
+      <content:encoded><![CDATA[<p>Retained content</p>]]></content:encoded>
+      <excerpt:encoded><![CDATA[Retained excerpt]]></excerpt:encoded>
+      <wp:post_id>2</wp:post_id>
+      <wp:post_type>post</wp:post_type>
+      <wp:status>publish</wp:status>
+    </item>`)), {
+    shouldRetainItemBody(item) {
+      inspected.push({
+        content: item.content,
+        excerpt: item.excerpt,
+        status: item.wp.status,
+      });
+      return item.wp.status === 'publish';
+    },
+  });
+
+  assert.deepEqual(inspected, [
+    {
+      content: '<p>Discarded content</p>',
+      excerpt: 'Discarded excerpt',
+      status: 'draft',
+    },
+    {
+      content: '<p>Retained content</p>',
+      excerpt: 'Retained excerpt',
+      status: 'publish',
+    },
+  ]);
+  assert.equal(document.items[0].content, '');
+  assert.equal(document.items[0].excerpt, '');
+  assert.equal(document.items[0].title, 'Draft');
+  assert.equal(document.items[0].wp.status, 'draft');
+  assert.equal(document.items[1].content, '<p>Retained content</p>');
+  assert.equal(document.items[1].excerpt, 'Retained excerpt');
+});
+
 test('parser accepts only async iterable sources', async () => {
   await assert.rejects(() => parseXml(wxrDocument('')), /expected an async iterable XML source/);
 });
@@ -110,6 +159,7 @@ function wxrDocument(channelChildren) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"
   xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
   xmlns:wp="http://wordpress.org/export/1.2/">
   <channel>
     <pubDate>Wed, 15 Jul 2026 09:00:00 +0000</pubDate>

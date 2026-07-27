@@ -49,6 +49,68 @@ test('large generated WXR converts, validates, and writes under a 128 MB old-spa
   assert.equal(generated.content.posts.at(-1).content, body);
 });
 
+test('excluded item bodies do not accumulate under a 128 MB old-space limit', { timeout: 30_000 }, async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'zeropress-wxr-excluded-memory-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const input = path.join(root, 'excluded.xml');
+  const base = path.join(root, 'base.json');
+  const output = path.join(root, 'preview-data.json');
+  const body = 'x'.repeat(32 * 1024);
+  const itemsPerKind = 300;
+  const inputFile = await fs.open(input, 'w');
+  try {
+    await inputFile.write(wxrDocumentStart());
+    for (let index = 0; index < itemsPerKind; index += 1) {
+      const draftId = index + 1;
+      const passwordId = index + 1 + itemsPerKind;
+      const customId = index + 1 + (itemsPerKind * 2);
+      const attachmentId = index + 1 + (itemsPerKind * 3);
+      await inputFile.write(excludedBodyItem(draftId, body, {
+        postType: 'post',
+        status: 'draft',
+      }));
+      await inputFile.write(excludedBodyItem(passwordId, body, {
+        postType: 'post',
+        status: 'publish',
+        password: 'secret',
+      }));
+      await inputFile.write(excludedBodyItem(customId, body, {
+        postType: 'product',
+        status: 'publish',
+      }));
+      await inputFile.write(excludedBodyItem(attachmentId, body, {
+        postType: 'attachment',
+        status: 'inherit',
+        attachmentUrl: `https://example.com/wp-content/uploads/2026/image-${attachmentId}.jpg`,
+      }));
+    }
+    await inputFile.write(postItem((itemsPerKind * 4) + 1, '<p>Retained</p>'));
+    await inputFile.write(wxrDocumentEnd());
+  } finally {
+    await inputFile.close();
+  }
+  await fs.writeFile(base, '{"version":"0.7","site":{}}\n', 'utf8');
+
+  const result = await executeNode([
+    '--max-old-space-size=128',
+    BIN_PATH,
+    '--input', input,
+    '--base', base,
+    '--output', output,
+  ], root);
+  assert.equal(result.code, 0, result.stderr);
+
+  const generated = JSON.parse(await fs.readFile(output, 'utf8'));
+  const report = JSON.parse(await fs.readFile(
+    path.join(root, '.zeropress-wxr-import', 'wxr-import-report.json'),
+    'utf8',
+  ));
+  assert.equal(generated.content.posts.length, 1);
+  assert.equal(generated.content.posts[0].content, '<p>Retained</p>');
+  assert.equal(report.skipped.unpublished_posts, itemsPerKind);
+  assert.equal(report.skipped.password_protected, itemsPerKind);
+});
+
 test('ambiguous attachment inference and warning aggregation remain linear under 128 MB', { timeout: 30_000 }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'zeropress-wxr-media-memory-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -126,6 +188,27 @@ function postItem(id, content) {
   </item>`;
 }
 
+function excludedBodyItem(id, content, {
+  postType,
+  status,
+  password = '',
+  attachmentUrl = '',
+}) {
+  return `<item>
+    <title>Excluded ${id}</title>
+    <content:encoded><![CDATA[${content}]]></content:encoded>
+    <excerpt:encoded><![CDATA[${content}]]></excerpt:encoded>
+    <wp:post_id>${id}</wp:post_id>
+    <wp:post_date_gmt>2026-01-01 00:00:00</wp:post_date_gmt>
+    <wp:post_modified_gmt>2026-01-01 00:00:00</wp:post_modified_gmt>
+    <wp:post_name>excluded-${id}</wp:post_name>
+    ${password ? `<wp:post_password>${password}</wp:post_password>` : ''}
+    <wp:post_type>${postType}</wp:post_type>
+    <wp:status>${status}</wp:status>
+    ${attachmentUrl ? `<wp:attachment_url>${attachmentUrl}</wp:attachment_url>` : ''}
+  </item>`;
+}
+
 function attachmentItem(id, url) {
   return `<item>
     <wp:post_id>${id}</wp:post_id>
@@ -151,16 +234,25 @@ function postWithMissingThumbnailItem(id, thumbnailId) {
 }
 
 function wxrDocument(items) {
+  return `${wxrDocumentStart()}${items}${wxrDocumentEnd()}`;
+}
+
+function wxrDocumentStart() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"
   xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
   xmlns:wp="http://wordpress.org/export/1.2/">
   <channel>
     <pubDate>Wed, 15 Jul 2026 09:00:00 +0000</pubDate>
     <title>Large Test</title>
     <link>https://example.com</link>
     <wp:wxr_version>1.2</wp:wxr_version>
-    ${items}
+`;
+}
+
+function wxrDocumentEnd() {
+  return `
   </channel>
 </rss>`;
 }

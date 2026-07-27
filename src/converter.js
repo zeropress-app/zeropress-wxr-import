@@ -63,7 +63,9 @@ const SEO_DESCRIPTION_META_KEYS = Object.freeze([
 export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   const baseData = normalizeBase(base);
   const widgets = createBaseWidgets(baseData.widgets);
-  const doc = await parseXml(xmlSource);
+  const doc = await parseXml(xmlSource, {
+    shouldRetainItemBody: isConvertibleDocumentItem,
+  });
   const channel = doc.channel;
   const generatedAt = parseRssPubDateToUtcSecondIso(directChildText(channel, 'pubDate'));
   if (!generatedAt) {

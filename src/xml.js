@@ -44,9 +44,13 @@ const IMPORTED_POST_META_KEYS = new Set([
   'rank_math_description',
 ]);
 
-export async function parseXml(source) {
+export async function parseXml(source, options = {}) {
   if (!source || typeof source[Symbol.asyncIterator] !== 'function') {
     throw new Error('Invalid WXR input: expected an async iterable XML source');
+  }
+  const shouldRetainItemBody = options?.shouldRetainItemBody;
+  if (shouldRetainItemBody !== undefined && typeof shouldRetainItemBody !== 'function') {
+    throw new Error('Invalid WXR input: shouldRetainItemBody must be a function');
   }
 
   const document = createDocumentRecord();
@@ -115,7 +119,13 @@ export async function parseXml(source) {
     const rawText = frame.text ? normalizeXmlLineEndings(frame.text.join('')) : '';
     const value = rawText.trim();
 
-    captureClosedFrame({ document, frame, parent, value });
+    captureClosedFrame({
+      document,
+      frame,
+      parent,
+      value,
+      shouldRetainItemBody,
+    });
   };
 
   const decoder = createUtf8Sanitizer();
@@ -276,7 +286,13 @@ function validateParsedDocument(document) {
   }
 }
 
-function captureClosedFrame({ document, frame, parent, value }) {
+function captureClosedFrame({
+  document,
+  frame,
+  parent,
+  value,
+  shouldRetainItemBody,
+}) {
   if (!parent) return;
 
   if (parent.role === 'channel') {
@@ -285,7 +301,13 @@ function captureClosedFrame({ document, frame, parent, value }) {
     if (frame.role === 'category-record') document.categories.push(frame.record);
     if (frame.role === 'tag-record') document.tags.push(frame.record);
     if (frame.role === 'term') document.terms.push(frame.record);
-    if (frame.role === 'item') document.items.push(frame.record);
+    if (frame.role === 'item') {
+      if (shouldRetainItemBody && !shouldRetainItemBody(frame.record)) {
+        frame.record.content = '';
+        frame.record.excerpt = '';
+      }
+      document.items.push(frame.record);
+    }
     return;
   }
 

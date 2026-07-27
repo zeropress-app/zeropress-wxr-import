@@ -29,10 +29,10 @@ test('validateFilePlan rejects canonical, inode, and reserved report collisions'
 
   await fs.unlink(plan.output);
   plan.artifactDir = realDirectory;
-  plan.baseArtifact = path.join(realDirectory, 'reserved.json');
+  plan.resolvedBaseArtifact = path.join(realDirectory, 'reserved.json');
   plan.reportArtifact = path.join(realDirectory, 'report.json');
   plan.output = path.join(aliasDirectory, 'reserved.json');
-  await assert.rejects(validateFilePlan(plan), collisionBetween('baseArtifact', 'output'));
+  await assert.rejects(validateFilePlan(plan), collisionBetween('resolvedBaseArtifact', 'output'));
 
   plan.output = plan.reportArtifact;
   await assert.rejects(validateFilePlan(plan), collisionBetween('reportArtifact', 'output'));
@@ -53,8 +53,11 @@ test('validateFilePlan rejects case-folded aliases and file path nesting before 
   }
 
   const nestedPlan = await makePlan(root);
-  nestedPlan.output = path.join(nestedPlan.baseArtifact, 'preview-data.json');
-  await assert.rejects(validateFilePlan(nestedPlan), collisionBetween('baseArtifact', 'output'));
+  nestedPlan.output = path.join(nestedPlan.resolvedBaseArtifact, 'preview-data.json');
+  await assert.rejects(
+    validateFilePlan(nestedPlan),
+    collisionBetween('resolvedBaseArtifact', 'output'),
+  );
 
   const directoryPlan = await makePlan(root);
   directoryPlan.output = directoryPlan.artifactDir;
@@ -76,20 +79,25 @@ test('resolvePathIdentity canonicalizes a missing target through its nearest rea
   assert.equal(alias.canonicalPath, real.canonicalPath);
 });
 
-test('validateFilePlan permits only canonical base artifact self-reuse', async (t) => {
+test('validateFilePlan rejects a resolved artifact used directly or through a hard link as base', async (t) => {
   const root = await makeFixture(t);
   const plan = await makePlan(root);
   await fs.mkdir(plan.artifactDir);
-  await fs.writeFile(plan.baseArtifact, '{"site":{},"import":{}}\n');
-  plan.base = plan.baseArtifact;
+  await fs.writeFile(plan.resolvedBaseArtifact, '{"site":{},"import":{}}\n');
+  plan.base = plan.resolvedBaseArtifact;
 
-  const result = await validateFilePlan(plan);
-  assert.equal(result.identities.base.canonicalPath, result.identities.baseArtifact.canonicalPath);
+  await assert.rejects(
+    validateFilePlan(plan),
+    collisionBetween('base', 'resolvedBaseArtifact'),
+  );
 
   const hardLink = path.join(root, 'base-hardlink.json');
-  await fs.link(plan.baseArtifact, hardLink);
+  await fs.link(plan.resolvedBaseArtifact, hardLink);
   plan.base = hardLink;
-  await assert.rejects(validateFilePlan(plan), collisionBetween('base', 'baseArtifact'));
+  await assert.rejects(
+    validateFilePlan(plan),
+    collisionBetween('base', 'resolvedBaseArtifact'),
+  );
 });
 
 test('validateFilePlan accepts an omitted optional base source', async (t) => {
@@ -190,7 +198,7 @@ async function makePlan(root) {
     base,
     output: path.join(root, 'preview-data.json'),
     artifactDir,
-    baseArtifact: path.join(artifactDir, 'wxr-import-base.json'),
+    resolvedBaseArtifact: path.join(artifactDir, 'wxr-import-base.resolved.json'),
     reportArtifact: path.join(artifactDir, 'wxr-import-report.json'),
   };
 }

@@ -38,7 +38,7 @@ export async function run(argv) {
     base: args.base,
     output: args.output,
     artifactDir: args.artifactDir,
-    baseArtifact: args.baseArtifact,
+    resolvedBaseArtifact: args.resolvedBaseArtifact,
     reportArtifact: args.reportArtifact,
   });
 
@@ -62,7 +62,7 @@ export async function run(argv) {
   printWarnings(report);
   printSummary({
     output: args.output,
-    basePath: args.baseArtifact,
+    resolvedBasePath: args.resolvedBaseArtifact,
     reportPath: args.writeReport ? args.reportArtifact : null,
     report,
   });
@@ -110,7 +110,7 @@ export function parseArgs(argv) {
     base: flags.base ? path.resolve(process.cwd(), flags.base) : null,
     output: path.resolve(process.cwd(), flags.output),
     artifactDir,
-    baseArtifact: path.join(artifactDir, 'wxr-import-base.json'),
+    resolvedBaseArtifact: path.join(artifactDir, 'wxr-import-base.resolved.json'),
     // The report path stays reserved for collision checks even when the report
     // itself is not written, so it can never alias another artifact.
     reportArtifact: path.join(artifactDir, 'wxr-import-report.json'),
@@ -167,7 +167,7 @@ async function writeArtifactsAtomically({ args, previewData, report, resolvedBas
   try {
     await ensureSafeDirectory(args.artifactDir);
 
-    stages.push(await stageJsonFile(args.baseArtifact, resolvedBase));
+    stages.push(await stageJsonFile(args.resolvedBaseArtifact, resolvedBase));
     if (args.writeReport) {
       stages.push(await stageJsonFile(args.reportArtifact, report));
     }
@@ -230,10 +230,10 @@ const EXCLUSION_SUMMARY_LABELS = Object.freeze([
   ['password_protected', 'Excluded password-protected items'],
 ]);
 
-function printSummary({ output, basePath, reportPath, report }) {
+function printSummary({ output, resolvedBasePath, reportPath, report }) {
   console.log(formatWxrImportSuccessMessage());
   console.log(`Output: ${toTerminalSafeText(output)}`);
-  console.log(`Base: ${toTerminalSafeText(basePath)}`);
+  console.log(`Resolved base: ${toTerminalSafeText(resolvedBasePath)}`);
   console.log(`Posts: ${report.counts.posts}`);
   console.log(`Pages: ${report.counts.pages}`);
   console.log(`Categories: ${report.counts.categories}`);

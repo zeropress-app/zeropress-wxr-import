@@ -43,6 +43,10 @@ test('parseArgs accepts an omitted base, validates output files, and reserves ev
   ]);
   assert.equal(args.writeReport, false);
   assert.equal(args.base, path.resolve(process.cwd(), 'base.json'));
+  assert.equal(
+    args.resolvedBaseArtifact,
+    path.join(args.artifactDir, 'wxr-import-base.resolved.json'),
+  );
   assert.equal(args.reportArtifact, path.join(args.artifactDir, 'wxr-import-report.json'));
   assert.equal(Object.hasOwn(args, 'schemaArtifact'), false);
 });
@@ -117,7 +121,7 @@ test('CLI rejects illegal menu URLs without writing output or helper artifacts',
 
     for (const artifact of [
       fixture.output,
-      fixture.baseArtifact,
+      fixture.resolvedBaseArtifact,
       fixture.reportArtifact,
     ]) {
       await assert.rejects(
@@ -154,7 +158,7 @@ test('CLI streams WXR and atomically writes resolved base, report, then output',
 
   const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
   const report = JSON.parse(await fs.readFile(fixture.reportArtifact, 'utf8'));
-  const resolvedBase = JSON.parse(await fs.readFile(fixture.baseArtifact, 'utf8'));
+  const resolvedBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
 
   assert.equal(previewData.content.posts.length, 1);
   assert.equal(previewData.generated_at, '2026-07-15T09:00:00Z');
@@ -182,6 +186,10 @@ test('CLI streams WXR and atomically writes resolved base, report, then output',
   assert.doesNotMatch(result.stderr, /^WARN /m);
   assert.doesNotMatch(result.stdout, /\nSchema:/);
   assert.match(result.stdout, new RegExp(`Report: ${escapeRegExp(fixture.reportArtifact)}`));
+  assert.match(
+    result.stdout,
+    new RegExp(`Resolved base: ${escapeRegExp(fixture.resolvedBaseArtifact)}`),
+  );
   await assertNoTemporaryFiles(fixture.root, fixture.artifactDir);
 });
 
@@ -189,7 +197,7 @@ test('CLI uses an empty base when --base is omitted even if a resolved helper ex
   const fixture = await makeFixture(t);
   await fs.mkdir(fixture.artifactDir);
   await fs.writeFile(
-    fixture.baseArtifact,
+    fixture.resolvedBaseArtifact,
     `${JSON.stringify({ site: {}, widgets: {} }, null, 2)}\n`,
     'utf8',
   );
@@ -201,7 +209,7 @@ test('CLI uses an empty base when --base is omitted even if a resolved helper ex
   assert.equal(result.code, 0, result.stderr);
 
   const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
-  const resolvedBase = JSON.parse(await fs.readFile(fixture.baseArtifact, 'utf8'));
+  const resolvedBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
   assert.equal(resolvedBase.version, '0.7');
   assert.deepEqual(previewData.widgets, defaultWidgets());
   assert.deepEqual(resolvedBase.widgets, defaultWidgets());
@@ -239,41 +247,57 @@ test('CLI omits report output but still writes the resolved base helper', async 
 
   assert.equal(result.code, 0, result.stderr);
   await fs.stat(fixture.output);
-  await fs.stat(fixture.baseArtifact);
+  await fs.stat(fixture.resolvedBaseArtifact);
   await assert.rejects(fs.stat(fixture.reportArtifact), { code: 'ENOENT' });
-  assert.deepEqual(await fs.readdir(fixture.artifactDir), ['wxr-import-base.json']);
+  assert.deepEqual(await fs.readdir(fixture.artifactDir), ['wxr-import-base.resolved.json']);
   assert.doesNotMatch(result.stdout, /\nReport:/);
 });
 
-test('CLI supports the generated resolved base as the next run base', async (t) => {
+test('CLI rejects the generated resolved artifact as base without overwriting it', async (t) => {
   const fixture = await makeFixture(t);
   const first = await executeCli(defaultArgs(), { cwd: fixture.root });
   assert.equal(first.code, 0, first.stderr);
-  const firstBase = JSON.parse(await fs.readFile(fixture.baseArtifact, 'utf8'));
-  assert.deepEqual(firstBase.widgets, defaultWidgets());
+  const firstBase = await fs.readFile(fixture.resolvedBaseArtifact);
 
   const second = await executeCli([
     '--input', 'input.xml',
-    '--base', '.zeropress-wxr-import/wxr-import-base.json',
+    '--base', '.zeropress-wxr-import/wxr-import-base.resolved.json',
+    '--output', 'preview-data-second.json',
+  ], { cwd: fixture.root });
+  assert.equal(second.code, 1);
+  assert.match(second.stderr, /base conflicts with resolvedBaseArtifact/);
+  assert.deepEqual(await fs.readFile(fixture.resolvedBaseArtifact), firstBase);
+  await assert.rejects(
+    fs.stat(path.join(fixture.root, 'preview-data-second.json')),
+    { code: 'ENOENT' },
+  );
+});
+
+test('CLI reuses a generated resolved base only after copying it to a separate base file', async (t) => {
+  const fixture = await makeFixture(t);
+  const first = await executeCli(defaultArgs(), { cwd: fixture.root });
+  assert.equal(first.code, 0, first.stderr);
+  const firstBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
+  assert.deepEqual(firstBase.widgets, defaultWidgets());
+  await fs.copyFile(fixture.resolvedBaseArtifact, fixture.base);
+  const copiedBase = await fs.readFile(fixture.base);
+
+  const secondOutputPath = path.join(fixture.root, 'preview-data-second.json');
+  const second = await executeCli([
+    '--input', 'input.xml',
+    '--base', 'wxr-import-base.json',
     '--output', 'preview-data-second.json',
   ], { cwd: fixture.root });
   assert.equal(second.code, 0, second.stderr);
 
-  const secondOutput = JSON.parse(await fs.readFile(path.join(fixture.root, 'preview-data-second.json'), 'utf8'));
-  const secondBase = JSON.parse(await fs.readFile(fixture.baseArtifact, 'utf8'));
+  const secondOutput = JSON.parse(await fs.readFile(secondOutputPath, 'utf8'));
+  const secondBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
+  assert.deepEqual(await fs.readFile(fixture.base), copiedBase);
   assert.equal(secondOutput.content.posts.length, 1);
-  assert.equal(Object.hasOwn(firstBase.site, 'datetime_display'), false);
-  assert.equal(Object.hasOwn(secondOutput.site, 'datetime_display'), false);
-  assert.equal(Object.hasOwn(secondBase.site, 'datetime_display'), false);
   assert.deepEqual(secondOutput.widgets, defaultWidgets());
   assert.deepEqual(secondBase.widgets, defaultWidgets());
   assert.deepEqual(secondOutput.site.comments, firstBase.comments);
   assert.deepEqual(secondBase.comments, firstBase.comments);
-  assert.equal(
-    secondBase.$schema,
-    'https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json',
-  );
-  assert.equal(secondBase.version, '0.7');
 });
 
 test('CLI preserves an explicit empty widgets object as a resolved opt-out', async (t) => {
@@ -286,7 +310,7 @@ test('CLI preserves an explicit empty widgets object as a resolved opt-out', asy
   assert.equal(result.code, 0, result.stderr);
 
   const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
-  const resolvedBase = JSON.parse(await fs.readFile(fixture.baseArtifact, 'utf8'));
+  const resolvedBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
   assert.deepEqual(previewData.widgets, {});
   assert.deepEqual(resolvedBase.widgets, {});
   assert.doesNotMatch(result.stderr, /^WARN /m);
@@ -300,7 +324,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
   const first = await executeCli(defaultArgs(), { cwd: fixture.root });
   assert.equal(first.code, 0, first.stderr);
   const firstOutput = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
-  const firstBase = JSON.parse(await fs.readFile(fixture.baseArtifact, 'utf8'));
+  const firstBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
   assert.deepEqual(firstBase.import, { media_from: source, media_to: source });
   assert.equal(firstBase.site.media_origin, '');
   assert.equal(firstOutput.site.media_origin, 'https://blog.example');
@@ -313,16 +337,16 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
   }]);
 
   firstBase.import.media_to = destination;
-  await fs.writeFile(fixture.baseArtifact, `${JSON.stringify(firstBase, null, 2)}\n`, 'utf8');
+  await fs.writeFile(fixture.base, `${JSON.stringify(firstBase, null, 2)}\n`, 'utf8');
   const secondOutputPath = path.join(fixture.root, 'preview-data-second.json');
   const second = await executeCli([
     '--input', 'input.xml',
-    '--base', '.zeropress-wxr-import/wxr-import-base.json',
+    '--base', 'wxr-import-base.json',
     '--output', 'preview-data-second.json',
   ], { cwd: fixture.root });
   assert.equal(second.code, 0, second.stderr);
   const secondOutput = JSON.parse(await fs.readFile(secondOutputPath, 'utf8'));
-  const secondBase = JSON.parse(await fs.readFile(fixture.baseArtifact, 'utf8'));
+  const secondBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
   assert.deepEqual(secondBase.import, { media_from: source, media_to: destination });
   assert.equal(secondBase.site.media_origin, '');
   assert.equal(secondOutput.site.media_origin, 'https://media.example');
@@ -331,7 +355,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
   const thirdOutputPath = path.join(fixture.root, 'preview-data-third.json');
   const third = await executeCli([
     '--input', 'input.xml',
-    '--base', '.zeropress-wxr-import/wxr-import-base.json',
+    '--base', 'wxr-import-base.json',
     '--output', 'preview-data-third.json',
   ], { cwd: fixture.root });
   assert.equal(third.code, 0, third.stderr);
@@ -400,7 +424,7 @@ async function makeFixture(t, wxr = minimalWxr()) {
     base: path.join(root, 'wxr-import-base.json'),
     output: path.join(root, 'preview-data.json'),
     artifactDir,
-    baseArtifact: path.join(artifactDir, 'wxr-import-base.json'),
+    resolvedBaseArtifact: path.join(artifactDir, 'wxr-import-base.resolved.json'),
     reportArtifact: path.join(artifactDir, 'wxr-import-report.json'),
   };
   await fs.writeFile(fixture.input, wxr, 'utf8');

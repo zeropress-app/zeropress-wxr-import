@@ -35,17 +35,6 @@ Convert a WordPress export into preview-data:
 npx @zeropress/wxr-import --input wordpress-export.xml --output preview-data.json
 ```
 
-The first run also writes `.zeropress-wxr-import/wxr-import-base.json`. Edit that
-file to supply anything WXR does not carry, then re-run with it to make the
-conversion reproducible:
-
-```bash
-npx @zeropress/wxr-import \
-  --input wordpress-export.xml \
-  --base .zeropress-wxr-import/wxr-import-base.json \
-  --output preview-data.json
-```
-
 Build a static site from the result with
 [@zeropress/build](https://www.npmjs.com/package/@zeropress/build):
 
@@ -109,7 +98,7 @@ part of the preview-data contract and are discarded.
 
 The CLI writes fixed helper artifacts under the current working directory:
 
-- `.zeropress-wxr-import/wxr-import-base.json`
+- `.zeropress-wxr-import/wxr-import-base.resolved.json`
 - `.zeropress-wxr-import/wxr-import-report.json`
 
 Use `--no-report` to skip writing `wxr-import-report.json`. The report path
@@ -122,6 +111,11 @@ stderr. The resolved base is always written and references the canonical schema:
   "version": "0.7"
 }
 ```
+
+`wxr-import-base.resolved.json` is a generated snapshot, not a user-managed
+base file. Whenever it is written, an existing file at that path is replaced
+without confirmation. The CLI rejects using this artifact directly as
+`--base`; copy it to a separate path before editing or reusing it.
 
 Before reading input, the CLI checks canonical paths and existing file
 identities. The output cannot alias the input, an optional base, or any helper
@@ -190,6 +184,18 @@ The canonical base schema is published at:
 https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json
 ```
 
+To create a reusable base from a conversion, copy the generated snapshot to a
+separate file, edit the copy, and pass that file with `--base`:
+
+```bash
+cp .zeropress-wxr-import/wxr-import-base.resolved.json ./wxr-import-base.json
+
+npx @zeropress/wxr-import \
+  --input wordpress-export.xml \
+  --base ./wxr-import-base.json \
+  --output preview-data.json
+```
+
 Before reading WXR, the importer validates every base value that is copied to
 Preview Data against the Preview Data v0.7 contract. This includes nested
 favicon, logo, front-page, post-index, footer, metadata, newsletter, widget,
@@ -229,7 +235,7 @@ fallback `robots.txt`. Omitting `site.robots` means indexing is allowed.
 Legacy `site.indexing` is rejected.
 
 When `widgets` is omitted, the importer materializes the following recommended
-sidebar in both preview-data and the resolved `wxr-import-base.json`:
+sidebar in both preview-data and `wxr-import-base.resolved.json`:
 
 ```json
 {
@@ -285,11 +291,11 @@ sidebar in both preview-data and the resolved `wxr-import-base.json`:
 Use `"widgets": {}` as an explicit opt-out. Any other provided widget object is
 preserved exactly; the importer does not add a `sidebar` beside custom areas or
 append default items to them. Materializing the fallback in the resolved base
-makes subsequent imports idempotent and gives you an editable preset. The
-English titles may be changed or set to an empty string to suppress their title
-markup. The importer does not synthesize `site.search` or `site.archive`;
-Build Core filters the corresponding widget when the effective feature is
-disabled.
+makes the effective default explicit and provides a starting point for a
+separately managed base. In that separate base, the English titles may be
+changed or set to an empty string to suppress their title markup. The importer
+does not synthesize `site.search` or `site.archive`; Build Core filters the
+corresponding widget when the effective feature is disabled.
 
 `custom_css`, when present, must use the canonical preview-data object shape:
 
@@ -395,13 +401,14 @@ cd wp-content/
 aws s3 sync uploads s3://your-public-media-bucket/imported
 ```
 
-After the transfer, change only `media_to` in the resolved base and run the
-importer again. When the normalized values differ, only the exact source prefix
-is replaced. Inline content, excerpts, and SEO metadata keep absolute
-destination URLs. Post/Page `featured_image` and matching
-`content.media[].src` values are root-relative when their final URL is under
-`site.media_origin`; cross-origin media remains absolute. The normalized
-`import.media_to` is retained in the resolved base.
+After the transfer, copy the resolved snapshot to a separate base file if
+needed, change only `media_to` in that file, and run the importer again with
+`--base`. When the normalized values differ, only the exact source prefix is
+replaced. Inline content, excerpts, and SEO metadata keep absolute destination
+URLs. Post/Page `featured_image` and matching `content.media[].src` values are
+root-relative when their final URL is under `site.media_origin`; cross-origin
+media remains absolute. The normalized `import.media_to` is retained in the
+resolved base.
 
 An explicit non-empty `site.media_origin` is preserved and must be an HTTP(S)
 origin without credentials, path, query, or fragment. A trailing root slash is

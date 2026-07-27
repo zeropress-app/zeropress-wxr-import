@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 const REQUIRED_SOURCE_ROLES = ['input'];
 const OPTIONAL_SOURCE_ROLES = ['base'];
-const ARTIFACT_ROLES = ['baseArtifact', 'reportArtifact'];
+const ARTIFACT_ROLES = ['resolvedBaseArtifact', 'reportArtifact'];
 const WRITE_ROLES = [...ARTIFACT_ROLES, 'output'];
 const MAX_TEMP_FILE_ATTEMPTS = 16;
 
@@ -138,12 +138,7 @@ export async function validateFilePlan(plan) {
       const leftKey = pathCollisionKey(left.canonicalPath);
       const rightKey = pathCollisionKey(right.canonicalPath);
       const sameCanonicalPath = leftKey === rightKey;
-      const exactCanonicalPath = left.canonicalPath === right.canonicalPath;
       const sameInode = left.inode !== null && right.inode !== null && left.inode === right.inode;
-
-      if (isBaseArtifactReuse(leftRole, rightRole) && exactCanonicalPath) {
-        continue;
-      }
 
       if (sameCanonicalPath || sameInode || isStrictPathAncestor(leftKey, rightKey) || isStrictPathAncestor(rightKey, leftKey)) {
         throw new FileSafetyError(
@@ -429,13 +424,6 @@ function sameTargetSnapshot(before, after) {
     return false;
   }
   return !before.exists || before.inode === after.inode;
-}
-
-function isBaseArtifactReuse(leftRole, rightRole) {
-  return (
-    (leftRole === 'base' && rightRole === 'baseArtifact')
-    || (leftRole === 'baseArtifact' && rightRole === 'base')
-  );
 }
 
 function pathCollisionKey(canonicalPath) {

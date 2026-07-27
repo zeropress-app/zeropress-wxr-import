@@ -119,17 +119,23 @@ test('CLI rejects illegal menu URLs without writing output or helper artifacts',
     assert.match(result.stderr, reason);
     assert.equal(result.stderr.includes(`URL ${JSON.stringify(url)}`), true);
 
-    for (const artifact of [
-      fixture.output,
-      fixture.resolvedBaseArtifact,
-      fixture.reportArtifact,
-    ]) {
-      await assert.rejects(
-        () => fs.access(artifact),
-        (error) => error?.code === 'ENOENT',
-      );
-    }
+    await assertNoConversionArtifacts(fixture);
   }
+});
+
+test('CLI rejects navigation menu slug collisions without writing artifacts', async (t) => {
+  const fixture = await makeFixture(t, menuSlugCollisionWxr());
+  const result = await executeCli(defaultArgs(), { cwd: fixture.root });
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /^\[zeropress-wxr-import\] Invalid WXR menu slug collision:/);
+  assert.match(result.stderr, /term ID "12".*slug "main\.\.nav"/);
+  assert.match(result.stderr, /term ID "34".*slug "main-nav"/);
+  assert.match(result.stderr, /both normalize to "main-nav"/);
+  assert.match(result.stderr, /Rename one of these menus in WordPress/);
+
+  await assertNoConversionArtifacts(fixture);
 });
 
 test('CLI rejects taxonomy slug collisions without writing output or helper artifacts', async (t) => {
@@ -143,16 +149,21 @@ test('CLI rejects taxonomy slug collisions without writing output or helper arti
   assert.match(result.stderr, /both normalize to "news"/);
   assert.match(result.stderr, /Rename one of these terms in WordPress/);
 
-  for (const artifact of [
-    fixture.output,
-    fixture.resolvedBaseArtifact,
-    fixture.reportArtifact,
-  ]) {
-    await assert.rejects(
-      () => fs.access(artifact),
-      (error) => error?.code === 'ENOENT',
-    );
-  }
+  await assertNoConversionArtifacts(fixture);
+});
+
+test('CLI rejects inline taxonomy slug collisions without writing artifacts', async (t) => {
+  const fixture = await makeFixture(t, inlineTaxonomySlugCollisionWxr());
+  const result = await executeCli(defaultArgs(), { cwd: fixture.root });
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /^\[zeropress-wxr-import\] Invalid WXR taxonomy slug collision:/);
+  assert.match(result.stderr, /category terms post ID "1".*and post ID "2"/);
+  assert.match(result.stderr, /both normalize to "alpha-beta"/);
+  assert.match(result.stderr, /Rename one of these terms in WordPress/);
+
+  await assertNoConversionArtifacts(fixture);
 });
 
 test('CLI removes malformed UTF-8 bytes without replacing a valid encoded U+FFFD', async (t) => {
@@ -539,6 +550,22 @@ function unsafeMenuWxr(url) {
     </item>`);
 }
 
+function menuSlugCollisionWxr() {
+  return wxrDocument(`
+    <wp:term>
+      <wp:term_id>12</wp:term_id>
+      <wp:term_slug>main..nav</wp:term_slug>
+      <wp:term_name>First Menu</wp:term_name>
+      <wp:term_taxonomy>nav_menu</wp:term_taxonomy>
+    </wp:term>
+    <wp:term>
+      <wp:term_id>34</wp:term_id>
+      <wp:term_slug>main-nav</wp:term_slug>
+      <wp:term_name>Second Menu</wp:term_name>
+      <wp:term_taxonomy>nav_menu</wp:term_taxonomy>
+    </wp:term>`);
+}
+
 function taxonomySlugCollisionWxr() {
   return wxrDocument(`
     <wp:category>
@@ -551,6 +578,34 @@ function taxonomySlugCollisionWxr() {
       <wp:category_nicename>news</wp:category_nicename>
       <wp:cat_name>News</wp:cat_name>
     </wp:category>`);
+}
+
+function inlineTaxonomySlugCollisionWxr() {
+  return wxrDocument(`
+    <item>
+      <title>First Post</title>
+      <content:encoded><![CDATA[<p>First</p>]]></content:encoded>
+      <wp:post_id>1</wp:post_id>
+      <wp:post_date_gmt>2026-01-02 03:04:05</wp:post_date_gmt>
+      <wp:post_modified_gmt>2026-01-03 03:04:05</wp:post_modified_gmt>
+      <wp:post_name>first-post</wp:post_name>
+      <wp:post_type>post</wp:post_type>
+      <wp:status>publish</wp:status>
+      <wp:comment_status>open</wp:comment_status>
+      <category domain="category" nicename="alpha..beta">First Category</category>
+    </item>
+    <item>
+      <title>Second Post</title>
+      <content:encoded><![CDATA[<p>Second</p>]]></content:encoded>
+      <wp:post_id>2</wp:post_id>
+      <wp:post_date_gmt>2026-01-02 03:04:05</wp:post_date_gmt>
+      <wp:post_modified_gmt>2026-01-03 03:04:05</wp:post_modified_gmt>
+      <wp:post_name>second-post</wp:post_name>
+      <wp:post_type>post</wp:post_type>
+      <wp:status>publish</wp:status>
+      <wp:comment_status>open</wp:comment_status>
+      <category domain="category" nicename="alpha-beta">Second Category</category>
+    </item>`);
 }
 
 function mediaWxr() {
@@ -705,6 +760,19 @@ function executeCli(args, { cwd } = {}) {
     child.on('error', reject);
     child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
+}
+
+async function assertNoConversionArtifacts(fixture) {
+  for (const artifact of [
+    fixture.output,
+    fixture.resolvedBaseArtifact,
+    fixture.reportArtifact,
+  ]) {
+    await assert.rejects(
+      () => fs.access(artifact),
+      (error) => error?.code === 'ENOENT',
+    );
+  }
 }
 
 async function assertNoTemporaryFiles(...directories) {

@@ -1,5 +1,5 @@
 import { addWarning } from './report.js';
-import { normalizeSlugSegment } from './slug.js';
+import { MAX_UNIQUE_NAME_ATTEMPTS, normalizeSlugSegment } from './slug.js';
 import { resolveNavigationUrl } from './url.js';
 import { itemCategories, postMetaValue, wpText } from './xml.js';
 
@@ -11,16 +11,23 @@ export function extractNavMenuTerms(doc) {
     if (wpText(term, 'term_taxonomy') !== 'nav_menu') {
       continue;
     }
-    const slug = normalizeSlugSegment(wpText(term, 'term_slug') || wpText(term, 'term_name'));
+    const rawSlug = wpText(term, 'term_slug');
+    const rawName = wpText(term, 'term_name');
+    const sourceSlug = rawSlug || rawName;
+    const slug = normalizeSlugSegment(sourceSlug);
     if (!slug) {
       continue;
     }
     terms.push({
+      wpId: wpText(term, 'term_id'),
+      rawSlug,
+      sourceSlug,
       slug,
-      name: wpText(term, 'term_name') || slug,
+      name: rawName || slug,
       order: Number.isSafeInteger(term.order) && term.order >= 0 ? term.order : index,
     });
   }
+  validateNavMenuSlugSources(terms, []);
   return terms;
 }
 
@@ -30,10 +37,12 @@ export function extractNavMenuItem(item) {
     return null;
   }
 
+  const menuSlugSources = navMenuSlugSourcesForItem(item, wpId);
   return {
     wpId,
     parentWpId: postMetaValue(item, '_menu_item_menu_item_parent') || '0',
-    menuSlugs: navMenuSlugsForItem(item),
+    menuSlugs: menuSlugSources.map((source) => source.slug),
+    menuSlugSources,
     order: Number.parseInt(wpText(item, 'menu_order') || '0', 10) || 0,
     title: String(item?.title ?? '').trim(),
     itemType: postMetaValue(item, '_menu_item_type'),
@@ -56,6 +65,8 @@ export function buildPreviewMenus({
   sourceOrigin,
   report,
 }) {
+  validateNavMenuSlugSources(terms, rawItems);
+
   if (rawItems.length === 0) {
     return {};
   }
@@ -81,6 +92,9 @@ export function buildPreviewMenus({
   for (const slug of activeMenuSlugs) {
     if (!discoveredTermSlugs.has(slug)) {
       terms.push({
+        wpId: '',
+        rawSlug: slug,
+        sourceSlug: slug,
         slug,
         name: slug,
         order: terms.length,
@@ -133,10 +147,75 @@ export function buildPreviewMenus({
   return menus;
 }
 
-function navMenuSlugsForItem(item) {
+function navMenuSlugSourcesForItem(item, itemWpId) {
   return itemCategories(item, 'nav_menu')
-    .map((category) => normalizeSlugSegment(category.nicename ?? ''))
-    .filter(Boolean);
+    .map((category) => {
+      const rawSlug = String(category.nicename ?? '').trim();
+      return {
+        kind: 'item',
+        itemWpId,
+        rawSlug,
+        sourceSlug: rawSlug,
+        slug: normalizeSlugSegment(rawSlug),
+        name: category.textContent?.trim() || rawSlug,
+      };
+    })
+    .filter((source) => source.slug);
+}
+
+function validateNavMenuSlugSources(terms, rawItems) {
+  const sourcesBySlug = new Map();
+
+  for (const term of terms) {
+    registerNavMenuSlugSource(sourcesBySlug, {
+      kind: 'term',
+      wpId: term.wpId ?? '',
+      rawSlug: term.rawSlug ?? term.slug,
+      sourceSlug: term.sourceSlug ?? term.rawSlug ?? term.slug,
+      slug: term.slug,
+      name: term.name,
+    });
+  }
+
+  for (const item of rawItems) {
+    const sources = Array.isArray(item.menuSlugSources) ? item.menuSlugSources : [];
+    for (const source of sources) {
+      registerNavMenuSlugSource(sourcesBySlug, source);
+    }
+  }
+}
+
+function registerNavMenuSlugSource(sourcesBySlug, source) {
+  const previousSource = sourcesBySlug.get(source.slug);
+  if (!previousSource) {
+    sourcesBySlug.set(source.slug, source);
+    return;
+  }
+
+  const repeatedItemReference = (previousSource.kind === 'item' || source.kind === 'item')
+    && previousSource.sourceSlug === source.sourceSlug;
+  if (repeatedItemReference) {
+    return;
+  }
+
+  throw new Error(
+    'Invalid WXR menu slug collision: menu sources '
+    + `${formatNavMenuSlugSource(previousSource)} and ${formatNavMenuSlugSource(source)} `
+    + `both normalize to ${JSON.stringify(source.slug)}. Rename one of these menus in WordPress, `
+    + 'then export the WXR again.',
+  );
+}
+
+function formatNavMenuSlugSource(source) {
+  const owner = source.kind === 'item'
+    ? `item ID ${JSON.stringify(String(source.itemWpId ?? ''))} assignment`
+    : source.wpId
+      ? `term ID ${JSON.stringify(String(source.wpId))}`
+      : 'term without an ID';
+  const slug = source.rawSlug
+    ? JSON.stringify(source.rawSlug)
+    : '(missing; using the menu name as fallback)';
+  return `${owner} (slug ${slug}, name ${JSON.stringify(String(source.name ?? ''))})`;
 }
 
 function convertMenuItem(raw, {
@@ -375,15 +454,32 @@ function buildMenuIdAssignments(terms, activeSlugs) {
       candidate = normalizeMenuId(term.slug || term.name, `menu-${term.order + 1}`);
     }
 
-    let unique = candidate;
-    let suffix = 2;
-    while (used.has(unique)) {
-      unique = `${candidate.slice(0, 60)}-${suffix}`.slice(0, 64);
-      suffix += 1;
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      assignments.set(term.slug, candidate);
+      return;
     }
 
-    used.add(unique);
-    assignments.set(term.slug, unique);
+    for (let suffix = 2; suffix < MAX_UNIQUE_NAME_ATTEMPTS; suffix += 1) {
+      const unique = `${candidate.slice(0, 60)}-${suffix}`;
+      if (!used.has(unique)) {
+        used.add(unique);
+        assignments.set(term.slug, unique);
+        return;
+      }
+    }
+
+    throw new Error(
+      'Invalid WXR menu ID collision: unable to allocate a unique ZeroPress menu ID for '
+      + `${formatNavMenuSlugSource({
+        kind: 'term',
+        wpId: term.wpId,
+        rawSlug: term.rawSlug ?? term.slug,
+        name: term.name,
+      })} from candidate ${JSON.stringify(candidate)}. `
+      + `At least ${MAX_UNIQUE_NAME_ATTEMPTS} menus map to the same ID family. `
+      + 'Rename or consolidate these menus in WordPress, then export the WXR again.',
+    );
   };
 
   if (primaryTerm) {

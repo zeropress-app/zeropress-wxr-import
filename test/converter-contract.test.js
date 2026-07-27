@@ -1165,6 +1165,101 @@ test('rejects tag terms whose source slugs normalize to the same slug', async ()
   );
 });
 
+test('rejects colliding category slugs synthesized from inline-only terms', async () => {
+  const xml = `
+    ${postItem({
+      id: 1,
+      slug: 'first-category-post',
+      categories: [['alpha..beta', 'First Category']],
+    })}
+    ${postItem({
+      id: 2,
+      slug: 'second-category-post',
+      categories: [['alpha-beta', 'Second Category']],
+    })}`;
+
+  await assert.rejects(
+    () => convert(xml, { site: {} }),
+    {
+      message: 'Invalid WXR taxonomy slug collision: category terms '
+        + 'post ID "1" inline term (slug "alpha..beta", name "First Category") and '
+        + 'post ID "2" inline term (slug "alpha-beta", name "Second Category") '
+        + 'both normalize to "alpha-beta". Rename one of these terms in WordPress, '
+        + 'then export the WXR again.',
+    },
+  );
+});
+
+test('rejects colliding tag slugs synthesized from inline-only terms', async () => {
+  const xml = `
+    ${postItem({
+      id: 1,
+      slug: 'first-tag-post',
+      tags: [['release...notes', 'First Tag']],
+    })}
+    ${postItem({
+      id: 2,
+      slug: 'second-tag-post',
+      tags: [['release-notes', 'Second Tag']],
+    })}`;
+
+  await assert.rejects(
+    () => convert(xml, { site: {} }),
+    {
+      message: 'Invalid WXR taxonomy slug collision: tag terms '
+        + 'post ID "1" inline term (slug "release...notes", name "First Tag") and '
+        + 'post ID "2" inline term (slug "release-notes", name "Second Tag") '
+        + 'both normalize to "release-notes". Rename one of these terms in WordPress, '
+        + 'then export the WXR again.',
+    },
+  );
+});
+
+test('rejects a collision between a declared term and an inline term', async () => {
+  const xml = `
+    <wp:category><wp:term_id>12</wp:term_id><wp:category_nicename>.news</wp:category_nicename><wp:cat_name>Dot News</wp:cat_name></wp:category>
+    ${postItem({
+      id: 1,
+      slug: 'inline-category-post',
+      categories: [['news', 'Inline News']],
+    })}`;
+
+  await assert.rejects(
+    () => convert(xml, { site: {} }),
+    {
+      message: 'Invalid WXR taxonomy slug collision: category terms '
+        + 'ID "12" (slug ".news", name "Dot News") and '
+        + 'post ID "1" inline term (slug "news", name "Inline News") '
+        + 'both normalize to "news". Rename one of these terms in WordPress, '
+        + 'then export the WXR again.',
+    },
+  );
+});
+
+test('allows repeated inline references to the same source taxonomy slug', async () => {
+  const xml = `
+    ${postItem({
+      id: 1,
+      slug: 'first-news-post',
+      categories: [['news', 'News']],
+    })}
+    ${postItem({
+      id: 2,
+      slug: 'second-news-post',
+      categories: [['news', 'News']],
+    })}`;
+  const { previewData } = await convert(xml, { site: {} });
+
+  assert.deepEqual(previewData.content.categories, [{
+    name: 'News',
+    slug: 'news',
+  }]);
+  assert.deepEqual(
+    previewData.content.posts.map((post) => post.category_slugs),
+    [['news'], ['news']],
+  );
+});
+
 test('allows category and tag terms to share the same normalized slug', async () => {
   const xml = `
     <wp:category><wp:term_id>12</wp:term_id><wp:category_nicename>.news</wp:category_nicename><wp:cat_name>Category News</wp:cat_name></wp:category>
@@ -1343,6 +1438,7 @@ function postItem({
   content = '<p>Body</p>',
   postmeta = [],
   commentStatus = 'open',
+  categories = [],
   tags = [],
 }) {
   return `<item>
@@ -1357,6 +1453,7 @@ function postItem({
     <wp:status>publish</wp:status>
     ${commentStatus === null ? '' : `<wp:comment_status>${commentStatus}</wp:comment_status>`}
     ${postmeta.map(([key, value]) => `<wp:postmeta><wp:meta_key>${key}</wp:meta_key><wp:meta_value><![CDATA[${value}]]></wp:meta_value></wp:postmeta>`).join('')}
+    ${categories.map(([categorySlug, categoryName]) => `<category domain="category" nicename="${categorySlug}"><![CDATA[${categoryName}]]></category>`).join('')}
     ${tags.map(([tagSlug, tagName]) => `<category domain="post_tag" nicename="${tagSlug}"><![CDATA[${tagName}]]></category>`).join('')}
   </item>`;
 }

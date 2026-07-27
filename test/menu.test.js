@@ -17,6 +17,7 @@ test('extracts navigation terms from SAX compact document records', () => {
       {
         order: 8,
         wp: {
+          term_id: '42',
           term_taxonomy: 'nav_menu',
           term_slug: 'Main Menu',
           term_name: 'Main navigation',
@@ -26,10 +27,45 @@ test('extracts navigation terms from SAX compact document records', () => {
   });
 
   assert.deepEqual(terms, [{
+    wpId: '42',
+    rawSlug: 'Main Menu',
+    sourceSlug: 'Main Menu',
     slug: 'Main-Menu',
     name: 'Main navigation',
     order: 8,
   }]);
+});
+
+test('rejects declared navigation menus whose source slugs normalize to the same slug', () => {
+  assert.throws(
+    () => extractNavMenuTerms({
+      terms: [
+        {
+          wp: {
+            term_id: '12',
+            term_taxonomy: 'nav_menu',
+            term_slug: 'main..nav',
+            term_name: 'First Menu',
+          },
+        },
+        {
+          wp: {
+            term_id: '34',
+            term_taxonomy: 'nav_menu',
+            term_slug: 'main-nav',
+            term_name: 'Second Menu',
+          },
+        },
+      ],
+    }),
+    {
+      message: 'Invalid WXR menu slug collision: menu sources '
+        + 'term ID "12" (slug "main..nav", name "First Menu") and '
+        + 'term ID "34" (slug "main-nav", name "Second Menu") '
+        + 'both normalize to "main-nav". Rename one of these menus in WordPress, '
+        + 'then export the WXR again.',
+    },
+  );
 });
 
 test('extracts navigation items from SAX compact item records', () => {
@@ -57,6 +93,14 @@ test('extracts navigation items from SAX compact item records', () => {
     wpId: '100',
     parentWpId: '55',
     menuSlugs: ['Main-Menu'],
+    menuSlugSources: [{
+      kind: 'item',
+      itemWpId: '100',
+      rawSlug: 'Main Menu',
+      sourceSlug: 'Main Menu',
+      slug: 'Main-Menu',
+      name: 'Main Menu',
+    }],
     order: 7,
     title: 'Documentation',
     itemType: 'custom',
@@ -65,6 +109,39 @@ test('extracts navigation items from SAX compact item records', () => {
     target: '_blank',
     url: 'https://docs.example/',
   });
+});
+
+test('rejects colliding inline menu assignments while allowing repeated references', () => {
+  const first = extractNavMenuItem({
+    title: 'First',
+    wp: { post_id: '101' },
+    postmeta: { _menu_item_type: 'custom', _menu_item_url: '/first' },
+    categories: [{ domain: 'nav_menu', nicename: 'main..nav', textContent: 'First Menu' }],
+  });
+  const second = extractNavMenuItem({
+    title: 'Second',
+    wp: { post_id: '102' },
+    postmeta: { _menu_item_type: 'custom', _menu_item_url: '/second' },
+    categories: [{ domain: 'nav_menu', nicename: 'main-nav', textContent: 'Second Menu' }],
+  });
+
+  assert.throws(
+    () => buildMenus({ terms: [], rawItems: [first, second], report: createReport() }),
+    /item ID "101" assignment.*slug "main\.\.nav".*item ID "102" assignment.*slug "main-nav".*normalize to "main-nav"/,
+  );
+
+  const repeated = extractNavMenuItem({
+    title: 'Repeated',
+    wp: { post_id: '103' },
+    postmeta: { _menu_item_type: 'custom', _menu_item_url: '/repeated' },
+    categories: [{ domain: 'nav_menu', nicename: 'main..nav', textContent: 'First Menu' }],
+  });
+  const menus = buildMenus({
+    terms: [],
+    rawItems: [first, repeated],
+    report: createReport(),
+  });
+  assert.deepEqual(menus.primary.items.map((item) => item.title), ['First', 'Repeated']);
 });
 
 test('records published menu items without a menu assignment as skipped', () => {
@@ -259,9 +336,36 @@ test('discards cycle components and their descendants while retaining other root
   });
 });
 
-function buildMenus({ rawItems, tagsByWpId = new Map(), report }) {
+test('fails quickly after exhausting bounded menu ID suffixes', () => {
+  const accepted = collidingMenuIds(1000);
+  const menus = buildMenus({ ...accepted, report: createReport() });
+  const menuIds = Object.keys(menus);
+  assert.equal(menuIds.length, 1000);
+  assert.equal(new Set(menuIds).size, 1000);
+  assert.equal(menuIds.includes(`${'a'.repeat(60)}-999`), true);
+
+  const rejected = collidingMenuIds(1001);
+  assert.throws(
+    () => buildMenus({ ...rejected, report: createReport() }),
+    (error) => {
+      assert.match(error.message, /^Invalid WXR menu ID collision:/);
+      assert.match(error.message, /term ID "1001"/);
+      assert.match(error.message, /candidate "a{64}"/);
+      assert.match(error.message, /At least 1000 menus map to the same ID family/);
+      assert.match(error.message, /Rename or consolidate these menus in WordPress/);
+      return true;
+    },
+  );
+});
+
+function buildMenus({
+  rawItems,
+  terms = [{ slug: 'primary', name: 'Primary', order: 0 }],
+  tagsByWpId = new Map(),
+  report,
+}) {
   return buildPreviewMenus({
-    terms: [{ slug: 'primary', name: 'Primary', order: 0 }],
+    terms,
     rawItems,
     postsByWpId: new Map(),
     pagesByWpId: new Map(),
@@ -275,6 +379,7 @@ function buildMenus({ rawItems, tagsByWpId = new Map(), report }) {
 function menuItem({
   wpId,
   parentWpId = '0',
+  menuSlugs = ['primary'],
   title,
   order = 0,
   itemType = 'custom',
@@ -285,7 +390,7 @@ function menuItem({
   return {
     wpId,
     parentWpId,
-    menuSlugs: ['primary'],
+    menuSlugs,
     order,
     title,
     itemType,
@@ -294,4 +399,27 @@ function menuItem({
     target: '_self',
     url,
   };
+}
+
+function collidingMenuIds(count) {
+  const prefix = 'a'.repeat(64);
+  const terms = [];
+  const rawItems = [];
+  for (let index = 0; index < count; index += 1) {
+    const slug = `${prefix}-${index}`;
+    terms.push({
+      wpId: String(index + 1),
+      rawSlug: slug,
+      sourceSlug: slug,
+      slug,
+      name: `Menu ${index + 1}`,
+      order: index,
+    });
+    rawItems.push(menuItem({
+      wpId: String(index + 1),
+      menuSlugs: [slug],
+      title: `Item ${index + 1}`,
+    }));
+  }
+  return { terms, rawItems };
 }

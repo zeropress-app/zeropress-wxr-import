@@ -12,7 +12,7 @@ const CHANNEL_WP_FIELDS = new Set(['base_blog_url', 'base_site_url', 'wxr_versio
 const AUTHOR_WP_FIELDS = new Set(['author_id', 'author_login', 'author_display_name']);
 const CATEGORY_WP_FIELDS = new Set(['term_id', 'category_nicename', 'cat_name', 'category_description']);
 const TAG_WP_FIELDS = new Set(['term_id', 'tag_slug', 'tag_name', 'tag_description']);
-const TERM_WP_FIELDS = new Set(['term_slug', 'term_name', 'term_taxonomy']);
+const TERM_WP_FIELDS = new Set(['term_id', 'term_slug', 'term_name', 'term_taxonomy']);
 const ITEM_WP_FIELDS = new Set([
   'attachment_url',
   'comment_status',

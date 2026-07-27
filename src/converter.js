@@ -118,8 +118,14 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   }
 
   const authorRegistry = extractAuthors(doc);
-  const categoriesBySlug = extractCategories(doc);
-  const tagsBySlug = extractTags(doc);
+  const {
+    termsBySlug: categoriesBySlug,
+    sourcesBySlug: categorySourcesBySlug,
+  } = extractCategories(doc);
+  const {
+    termsBySlug: tagsBySlug,
+    sourcesBySlug: tagSourcesBySlug,
+  } = extractTags(doc);
   const navMenuTerms = extractNavMenuTerms(doc);
   const attachmentsByWpId = new Map();
   const pendingFeaturedImages = [];
@@ -226,6 +232,8 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
         report,
         categoriesBySlug,
         tagsBySlug,
+        categorySourcesBySlug,
+        tagSourcesBySlug,
         pendingFeaturedImages,
         usedPostSlugs,
       });
@@ -985,12 +993,7 @@ function extractTaxonomyTerms(entries, {
     };
     const previousSource = sourcesBySlug.get(slug);
     if (previousSource) {
-      throw new Error(
-        `Invalid WXR taxonomy slug collision: ${taxonomy} terms `
-        + `${formatTaxonomyTermSource(previousSource)} and ${formatTaxonomyTermSource(source)} `
-        + `both normalize to ${JSON.stringify(slug)}. Rename one of these terms in WordPress, `
-        + 'then export the WXR again.',
-      );
+      throwTaxonomySlugCollision(taxonomy, slug, previousSource, source);
     }
 
     sourcesBySlug.set(slug, source);
@@ -1001,11 +1004,29 @@ function extractTaxonomyTerms(entries, {
       description: wpText(entry, descriptionField),
     });
   }
-  return terms;
+  return { termsBySlug: terms, sourcesBySlug };
 }
 
-function formatTaxonomyTermSource({ wpId, rawSlug, name }) {
-  const id = wpId ? `ID ${JSON.stringify(wpId)}` : 'without a term ID';
+function throwTaxonomySlugCollision(taxonomy, slug, previousSource, source) {
+  throw new Error(
+    `Invalid WXR taxonomy slug collision: ${taxonomy} terms `
+    + `${formatTaxonomyTermSource(previousSource)} and ${formatTaxonomyTermSource(source)} `
+    + `both normalize to ${JSON.stringify(slug)}. Rename one of these terms in WordPress, `
+    + 'then export the WXR again.',
+  );
+}
+
+function formatTaxonomyTermSource({
+  wpId,
+  itemWpId,
+  rawSlug,
+  name,
+}) {
+  const id = itemWpId
+    ? `post ID ${JSON.stringify(itemWpId)} inline term`
+    : wpId
+      ? `ID ${JSON.stringify(wpId)}`
+      : 'without a term ID';
   const slug = rawSlug
     ? JSON.stringify(rawSlug)
     : '(missing; using the term name as fallback)';
@@ -1048,6 +1069,8 @@ function convertPost({
   report,
   categoriesBySlug,
   tagsBySlug,
+  categorySourcesBySlug,
+  tagSourcesBySlug,
   pendingFeaturedImages,
   usedPostSlugs,
 }) {
@@ -1072,8 +1095,20 @@ function convertPost({
     author_id: author.id,
     status: 'published',
     ...(shared.allowComments ? { allow_comments: true } : {}),
-    category_slugs: collectItemTermSlugs(item, 'category', categoriesBySlug),
-    tag_slugs: collectItemTermSlugs(item, 'post_tag', tagsBySlug),
+    category_slugs: collectItemTermSlugs({
+      item,
+      domain: 'category',
+      taxonomy: 'category',
+      knownTerms: categoriesBySlug,
+      sourcesBySlug: categorySourcesBySlug,
+    }),
+    tag_slugs: collectItemTermSlugs({
+      item,
+      domain: 'post_tag',
+      taxonomy: 'tag',
+      knownTerms: tagsBySlug,
+      sourcesBySlug: tagSourcesBySlug,
+    }),
   };
 
   if (shared.metaDescription) {
@@ -1148,20 +1183,43 @@ function normalizeWordPressReferenceId(value) {
   return publicId ? String(publicId) : normalized;
 }
 
-function collectItemTermSlugs(item, domain, knownTerms) {
+function collectItemTermSlugs({
+  item,
+  domain,
+  taxonomy,
+  knownTerms,
+  sourcesBySlug,
+}) {
   const seen = new Set();
   const slugs = [];
   for (const category of itemCategories(item, domain)) {
-    const slug = normalizeSlugSegment(category.nicename ?? '');
-    if (!slug || seen.has(slug)) {
+    const rawSlug = String(category.nicename ?? '').trim();
+    const slug = normalizeSlugSegment(rawSlug);
+    if (!slug) {
       continue;
     }
 
+    const name = category.textContent?.trim() || slug;
+    const source = {
+      itemWpId: wpText(item, 'post_id'),
+      name,
+      rawSlug,
+    };
+    const previousSource = sourcesBySlug.get(slug);
+    if (previousSource && previousSource.rawSlug !== rawSlug) {
+      throwTaxonomySlugCollision(taxonomy, slug, previousSource, source);
+    }
+    if (!previousSource) {
+      sourcesBySlug.set(slug, source);
+    }
+
     if (!knownTerms.has(slug)) {
-      const name = category.textContent?.trim() || slug;
       knownTerms.set(slug, { name, slug, description: '' });
     }
 
+    if (seen.has(slug)) {
+      continue;
+    }
     seen.add(slug);
     slugs.push(slug);
   }

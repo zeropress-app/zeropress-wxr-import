@@ -452,13 +452,21 @@ Successful automatic inference is also recorded as
 - WXR categories, tags, authors, and nav menus are converted when possible.
   Taxonomy menu items support both categories and tags.
 - Category and tag slugs are normalized in separate taxonomy namespaces. If
-  two terms in the same taxonomy normalize to the same slug, the complete
-  conversion fails and identifies both terms instead of silently discarding
-  one. A category and tag may share the same normalized slug.
+  two distinct source slugs in the same taxonomy normalize to the same slug,
+  the complete conversion fails and identifies both terms instead of silently
+  discarding one. This applies across top-level declarations and inline
+  `<category>` elements. Repeated inline references to the same source slug
+  remain valid. A category and tag may share the same normalized slug.
 - Each Post's `tag_slugs` preserves the order of its WXR
   `<category domain="post_tag">` elements and removes later occurrences of the
   same slug. The global `content.tags` catalog is instead sorted by name and
   then slug using a locale-independent lexical comparison.
+- Distinct WordPress navigation menu slugs that normalize to the same slug
+  fail the complete conversion and identify both menu sources. Repeated menu
+  item assignments to the same source slug remain valid.
+- Generated menu IDs resolve ordinary output-ID conflicts with numeric suffixes.
+  If 1,000 menus map to the same ID family, conversion fails with the affected
+  menu context instead of continuing indefinitely.
 - Menu item `type` is not emitted.
 - Datetimes are emitted as UTC seconds: `YYYY-MM-DDTHH:mm:ssZ`.
 - Custom menu URLs on the WXR source origin become root-relative URLs. External

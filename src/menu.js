@@ -27,8 +27,7 @@ export function extractNavMenuTerms(doc) {
       order: Number.isSafeInteger(term.order) && term.order >= 0 ? term.order : index,
     });
   }
-  validateNavMenuSlugSources(terms, []);
-  return terms;
+  return deduplicateNavMenuTerms(terms);
 }
 
 export function extractNavMenuItem(item) {
@@ -65,6 +64,7 @@ export function buildPreviewMenus({
   sourceOrigin,
   report,
 }) {
+  terms = deduplicateNavMenuTerms(terms);
   validateNavMenuSlugSources(terms, rawItems);
 
   if (rawItems.length === 0) {
@@ -163,18 +163,68 @@ function navMenuSlugSourcesForItem(item, itemWpId) {
     .filter((source) => source.slug);
 }
 
+function deduplicateNavMenuTerms(terms) {
+  const uniqueTerms = [];
+  const sourcesByWpId = new Map();
+  const sourcesBySlug = new Map();
+
+  for (const term of terms) {
+    const source = navMenuTermSource(term);
+    const previousByWpId = source.wpId ? sourcesByWpId.get(source.wpId) : null;
+    if (previousByWpId) {
+      if (isSameNavMenuTermDeclaration(previousByWpId, source)) {
+        continue;
+      }
+      throw new Error(
+        'Invalid WXR menu term conflict: '
+        + `${formatNavMenuSlugSource(previousByWpId)} conflicts with `
+        + `${formatNavMenuSlugSource(source)}. A WordPress menu term ID must have one `
+        + 'source slug and name. Repair the menu in WordPress, then export the WXR again.',
+      );
+    }
+
+    const previousBySlug = sourcesBySlug.get(source.slug);
+    if (previousBySlug) {
+      if (isSameNavMenuTermDeclaration(previousBySlug, source)) {
+        continue;
+      }
+      throwNavMenuSlugCollision(previousBySlug, source);
+    }
+
+    if (source.wpId) {
+      sourcesByWpId.set(source.wpId, source);
+    }
+    sourcesBySlug.set(source.slug, source);
+    uniqueTerms.push(term);
+  }
+
+  return uniqueTerms;
+}
+
+function navMenuTermSource(term) {
+  return {
+    kind: 'term',
+    wpId: term.wpId ?? '',
+    rawSlug: term.rawSlug ?? term.slug,
+    sourceSlug: term.sourceSlug ?? term.rawSlug ?? term.slug,
+    slug: term.slug,
+    name: term.name,
+  };
+}
+
+function isSameNavMenuTermDeclaration(left, right) {
+  return left.wpId === right.wpId
+    && left.rawSlug === right.rawSlug
+    && left.sourceSlug === right.sourceSlug
+    && left.slug === right.slug
+    && left.name === right.name;
+}
+
 function validateNavMenuSlugSources(terms, rawItems) {
   const sourcesBySlug = new Map();
 
   for (const term of terms) {
-    registerNavMenuSlugSource(sourcesBySlug, {
-      kind: 'term',
-      wpId: term.wpId ?? '',
-      rawSlug: term.rawSlug ?? term.slug,
-      sourceSlug: term.sourceSlug ?? term.rawSlug ?? term.slug,
-      slug: term.slug,
-      name: term.name,
-    });
+    registerNavMenuSlugSource(sourcesBySlug, navMenuTermSource(term));
   }
 
   for (const item of rawItems) {
@@ -198,6 +248,10 @@ function registerNavMenuSlugSource(sourcesBySlug, source) {
     return;
   }
 
+  throwNavMenuSlugCollision(previousSource, source);
+}
+
+function throwNavMenuSlugCollision(previousSource, source) {
   throw new Error(
     'Invalid WXR menu slug collision: menu sources '
     + `${formatNavMenuSlugSource(previousSource)} and ${formatNavMenuSlugSource(source)} `

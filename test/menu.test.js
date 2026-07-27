@@ -36,6 +36,72 @@ test('extracts navigation terms from SAX compact document records', () => {
   }]);
 });
 
+test('deduplicates identical repeated navigation menu term declarations', () => {
+  const terms = extractNavMenuTerms({
+    terms: [
+      {
+        order: 3,
+        wp: {
+          term_id: '203',
+          term_taxonomy: 'nav_menu',
+          term_slug: 'blank',
+          term_name: 'blank',
+        },
+      },
+      {
+        order: 99,
+        wp: {
+          term_id: '203',
+          term_taxonomy: 'nav_menu',
+          term_slug: 'blank',
+          term_name: 'blank',
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(terms, [{
+    wpId: '203',
+    rawSlug: 'blank',
+    sourceSlug: 'blank',
+    slug: 'blank',
+    name: 'blank',
+    order: 3,
+  }]);
+});
+
+test('rejects inconsistent declarations for the same navigation menu term ID', () => {
+  assert.throws(
+    () => extractNavMenuTerms({
+      terms: [
+        {
+          wp: {
+            term_id: '203',
+            term_taxonomy: 'nav_menu',
+            term_slug: 'blank',
+            term_name: 'blank',
+          },
+        },
+        {
+          wp: {
+            term_id: '203',
+            term_taxonomy: 'nav_menu',
+            term_slug: 'renamed',
+            term_name: 'Renamed Menu',
+          },
+        },
+      ],
+    }),
+    {
+      message: 'Invalid WXR menu term conflict: '
+        + 'term ID "203" (slug "blank", name "blank") conflicts with '
+        + 'term ID "203" (slug "renamed", name "Renamed Menu"). '
+        + 'A WordPress menu term ID must have one source slug and name. '
+        + 'Repair the menu in WordPress, then export the WXR again.',
+    },
+  );
+});
+
 test('rejects declared navigation menus whose source slugs normalize to the same slug', () => {
   assert.throws(
     () => extractNavMenuTerms({

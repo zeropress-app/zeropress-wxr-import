@@ -1132,6 +1132,21 @@ test('tag term IDs resolve post_tag taxonomy menu URLs', async () => {
   assert.equal(previewData.menus.primary.items[0].url, '/topics/release/');
 });
 
+test('deduplicates identical nav menu terms repeated by a WordPress exporter', async () => {
+  const xml = `
+    <wp:term><wp:term_id>203</wp:term_id><wp:term_slug>main</wp:term_slug><wp:term_name>Main</wp:term_name><wp:term_taxonomy>nav_menu</wp:term_taxonomy></wp:term>
+    <wp:term><wp:term_id>203</wp:term_id><wp:term_slug>main</wp:term_slug><wp:term_name>Main</wp:term_name><wp:term_taxonomy>nav_menu</wp:term_taxonomy></wp:term>
+    ${postItem({ id: 1, slug: 'menu-target' })}
+    ${menuItem({ id: 700, objectType: 'post', objectId: 1, title: 'Menu Target' })}`;
+  const { previewData } = await convert(xml, { site: {} });
+
+  assert.equal(previewData.menus.primary.name, 'Main');
+  assert.deepEqual(
+    previewData.menus.primary.items.map(({ title, url }) => ({ title, url })),
+    [{ title: 'Menu Target', url: '/posts/menu-target/' }],
+  );
+});
+
 test('rejects category terms whose source slugs normalize to the same slug', async () => {
   const xml = `
     <wp:category><wp:term_id>12</wp:term_id><wp:category_nicename>.news</wp:category_nicename><wp:cat_name>Dot News</wp:cat_name></wp:category>

@@ -462,8 +462,10 @@ Successful automatic inference is also recorded as
   same slug. The global `content.tags` catalog is instead sorted by name and
   then slug using a locale-independent lexical comparison.
 - Distinct WordPress navigation menu slugs that normalize to the same slug
-  fail the complete conversion and identify both menu sources. Repeated menu
-  item assignments to the same source slug remain valid.
+  fail the complete conversion and identify both menu sources. Identical
+  repeated declarations of the same term ID, source slug, and name are
+  deduplicated, and repeated menu item assignments to the same source slug
+  remain valid. Conflicting declarations for one term ID fail conversion.
 - Generated menu IDs resolve ordinary output-ID conflicts with numeric suffixes.
   If 1,000 menus map to the same ID family, conversion fails with the affected
   menu context instead of continuing indefinitely.

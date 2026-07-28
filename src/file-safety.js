@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 const REQUIRED_SOURCE_ROLES = ['input'];
 const OPTIONAL_SOURCE_ROLES = ['base'];
 const ARTIFACT_ROLES = ['resolvedBaseArtifact', 'reportArtifact'];
-const WRITE_ROLES = [...ARTIFACT_ROLES, 'output'];
 const MAX_TEMP_FILE_ATTEMPTS = 16;
 
 class FileSafetyError extends Error {
@@ -82,9 +81,9 @@ export async function resolvePathIdentity(filePath) {
 }
 
 /**
- * Validate every source and reserved destination before the CLI reads input.
- * reportArtifact is deliberately mandatory even when --no-report is active:
- * its path remains reserved and therefore cannot alias output or another file.
+ * Validate every configured source and destination before the CLI reads input.
+ * The resolved-base/report bundle is optional and is only reserved when both
+ * artifact paths and their directory are present.
  *
  * Returns the resolved plan with the path identities the checks were based on.
  */
@@ -97,7 +96,22 @@ export async function validateFilePlan(plan) {
     ...REQUIRED_SOURCE_ROLES,
     ...OPTIONAL_SOURCE_ROLES.filter((role) => plan[role] !== undefined && plan[role] !== null),
   ];
-  const planRoles = [...sourceRoles, ...WRITE_ROLES];
+  const configuredArtifactRoles = ARTIFACT_ROLES.filter(
+    (role) => plan[role] !== undefined && plan[role] !== null,
+  );
+  if (
+    configuredArtifactRoles.length !== 0
+    && configuredArtifactRoles.length !== ARTIFACT_ROLES.length
+  ) {
+    throw new TypeError('Resolved base and report artifact paths must be configured together');
+  }
+  const hasArtifactBundle = configuredArtifactRoles.length === ARTIFACT_ROLES.length;
+  if (!hasArtifactBundle && plan.artifactDir !== undefined && plan.artifactDir !== null) {
+    throw new TypeError('artifactDir requires resolved base and report artifact paths');
+  }
+
+  const writeRoles = [...configuredArtifactRoles, 'output'];
+  const planRoles = [...sourceRoles, ...writeRoles];
   const normalized = {};
   for (const role of planRoles) {
     normalized[role] = normalizePath(plan[role], role);
@@ -105,27 +119,39 @@ export async function validateFilePlan(plan) {
   if (!sourceRoles.includes('base')) {
     normalized.base = null;
   }
-  normalized.artifactDir = normalizePath(plan.artifactDir, 'artifactDir');
+  normalized.artifactDir = hasArtifactBundle
+    ? normalizePath(plan.artifactDir, 'artifactDir')
+    : null;
+  for (const role of ARTIFACT_ROLES) {
+    if (!hasArtifactBundle) {
+      normalized[role] = null;
+    }
+  }
 
   await Promise.all(sourceRoles.map((role) => assertReadableRegularFile(normalized[role], role)));
-  await assertSafeDirectory(normalized.artifactDir, 'artifact directory', { allowMissing: true });
-  await Promise.all(WRITE_ROLES.map((role) => assertSafeWriteTarget(normalized[role], role)));
+  if (hasArtifactBundle) {
+    await assertSafeDirectory(normalized.artifactDir, 'artifact directory', { allowMissing: true });
+  }
+  await Promise.all(writeRoles.map((role) => assertSafeWriteTarget(normalized[role], role)));
 
   const identities = Object.fromEntries(
     await Promise.all(
       planRoles.map(async (role) => [role, await resolvePathIdentity(normalized[role])]),
     ),
   );
-  const artifactDirectoryIdentity = await resolvePathIdentity(normalized.artifactDir);
-  const artifactDirectoryKey = pathCollisionKey(artifactDirectoryIdentity.canonicalPath);
+  let artifactDirectoryKey = null;
+  if (hasArtifactBundle) {
+    const artifactDirectoryIdentity = await resolvePathIdentity(normalized.artifactDir);
+    artifactDirectoryKey = pathCollisionKey(artifactDirectoryIdentity.canonicalPath);
 
-  for (const role of ARTIFACT_ROLES) {
-    const parentIdentity = await resolvePathIdentity(path.dirname(normalized[role]));
-    if (parentIdentity.canonicalPath !== artifactDirectoryIdentity.canonicalPath) {
-      throw new FileSafetyError(
-        'ARTIFACT_OUTSIDE_DIRECTORY',
-        `${role} must be a direct child of the artifact directory: ${normalized[role]}`,
-      );
+    for (const role of ARTIFACT_ROLES) {
+      const parentIdentity = await resolvePathIdentity(path.dirname(normalized[role]));
+      if (parentIdentity.canonicalPath !== artifactDirectoryIdentity.canonicalPath) {
+        throw new FileSafetyError(
+          'ARTIFACT_OUTSIDE_DIRECTORY',
+          `${role} must be a direct child of the artifact directory: ${normalized[role]}`,
+        );
+      }
     }
   }
 
@@ -149,7 +175,10 @@ export async function validateFilePlan(plan) {
     }
   }
 
-  if (pathCollisionKey(identities.output.canonicalPath) === artifactDirectoryKey) {
+  if (
+    artifactDirectoryKey !== null
+    && pathCollisionKey(identities.output.canonicalPath) === artifactDirectoryKey
+  ) {
     throw new FileSafetyError(
       'PATH_COLLISION',
       'Unsafe path collision: artifactDir conflicts with output',

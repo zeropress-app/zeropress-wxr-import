@@ -78,7 +78,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
       'Invalid WXR input: channel pubDate must be a valid WordPress-style RFC 2822 date',
     );
   }
-  const packageVersion = options.packageVersion || '0.0.0';
+  const generatorVersion = options.generatorVersion || '0.0.0';
   const report = createReport();
 
   const items = doc.items;
@@ -323,7 +323,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   const previewData = {
     $schema: PREVIEW_DATA_SCHEMA_URL,
     version: '0.7',
-    generator: `zeropress-wxr-import v${packageVersion}`,
+    generator: `zeropress-wxr-import v${generatorVersion}`,
     generated_at: generatedAt,
     site,
     content,

@@ -9,7 +9,7 @@ import { parseArgs } from '../src/index.js';
 
 const BIN_PATH = fileURLToPath(new URL('../bin/zeropress-wxr-import.js', import.meta.url));
 
-test('parseArgs accepts an omitted base, validates output files, and reserves every helper path', () => {
+test('parseArgs defaults to primary output only and accepts explicit report and generator options', () => {
   assert.throws(() => parseArgs(['--input', 'a.xml']), /--output <file> is required/);
   assert.throws(
     () => parseArgs([
@@ -33,15 +33,21 @@ test('parseArgs accepts an omitted base, validates output files, and reserves ev
     '--output', 'preview-data.json',
   ]);
   assert.equal(withoutBase.base, null);
-  assert.equal(withoutBase.writeReport, true);
+  assert.equal(withoutBase.withReport, false);
+  assert.equal(withoutBase.generatorVersionOverride, null);
+  assert.equal(withoutBase.artifactDir, null);
+  assert.equal(withoutBase.resolvedBaseArtifact, null);
+  assert.equal(withoutBase.reportArtifact, null);
 
   const args = parseArgs([
     '--input', 'a.xml',
     '--base', 'base.json',
     '--output', 'preview-data.json',
-    '--no-report',
+    '--with-report',
+    '--override-generator-version', '0.7.1',
   ]);
-  assert.equal(args.writeReport, false);
+  assert.equal(args.withReport, true);
+  assert.equal(args.generatorVersionOverride, '0.7.1');
   assert.equal(args.base, path.resolve(process.cwd(), 'base.json'));
   assert.equal(
     args.resolvedBaseArtifact,
@@ -51,12 +57,51 @@ test('parseArgs accepts an omitted base, validates output files, and reserves ev
   assert.equal(Object.hasOwn(args, 'schemaArtifact'), false);
 });
 
+test('rejects invalid generator version overrides', () => {
+  assert.throws(
+    () => parseArgs([
+      '--input', 'a.xml',
+      '--output', 'out.json',
+      '--override-generator-version',
+    ]),
+    /--override-generator-version requires a value/,
+  );
+
+  for (const version of ['v0.7.1', '0.7', '01.2.3', '1.2.3-01', '1.2.3..4']) {
+    assert.throws(
+      () => parseArgs([
+        '--input', 'a.xml',
+        '--output', 'out.json',
+        '--override-generator-version', version,
+      ]),
+      /--override-generator-version must be a complete SemVer version/,
+    );
+  }
+
+  for (const version of ['0.7.1', '1.0.0-beta.1', '1.0.0+Build.5', '1.0.0-0A']) {
+    assert.equal(
+      parseArgs([
+        '--input', 'a.xml',
+        '--output', 'out.json',
+        '--override-generator-version', version,
+      ]).generatorVersionOverride,
+      version,
+    );
+  }
+});
+
 test('rejects every duplicate CLI option declaration', async () => {
   const duplicateCases = [
     [['--input', 'a.xml', '--input', 'b.xml', '--output', 'out.json'], '--input'],
     [['--input', 'a.xml', '--base', 'a.json', '--base', 'b.json', '--output', 'out.json'], '--base'],
     [['--input', 'a.xml', '--output', 'a.json', '--output', 'b.json'], '--output'],
-    [['--input', 'a.xml', '--output', 'out.json', '--no-report', '--no-report'], '--no-report'],
+    [['--input', 'a.xml', '--output', 'out.json', '--with-report', '--with-report'], '--with-report'],
+    [[
+      '--input', 'a.xml',
+      '--output', 'out.json',
+      '--override-generator-version', '0.7.1',
+      '--override-generator-version', '0.7.2',
+    ], '--override-generator-version'],
   ];
   for (const [args, option] of duplicateCases) {
     assert.throws(
@@ -72,6 +117,11 @@ test('rejects every duplicate CLI option declaration', async () => {
   const duplicateVersion = await executeCli(['--version', '-v']);
   assert.equal(duplicateVersion.code, 1);
   assert.match(duplicateVersion.stderr, /Invalid arguments: duplicate option --version/);
+
+  assert.throws(
+    () => parseArgs(['--input', 'a.xml', '--output', 'out.json', '--no-report']),
+    /Invalid arguments: unknown option --no-report/,
+  );
 });
 
 test('CLI shows help and exits successfully when no arguments are provided', async () => {
@@ -79,8 +129,11 @@ test('CLI shows help and exits successfully when no arguments are provided', asy
   assert.equal(noArguments.code, 0);
   assert.match(
     noArguments.stdout,
-    /--input <file> --output <file\.json> \[--base <file>\]/,
+    /--input <file> --output <file\.json> \[options\]/,
   );
+  assert.match(noArguments.stdout, /--with-report/);
+  assert.match(noArguments.stdout, /--override-generator-version <ver>/);
+  assert.doesNotMatch(noArguments.stdout, /--no-report/);
   assert.doesNotMatch(noArguments.stdout, /<(?:path)>/);
   assert.equal(noArguments.stderr, '');
 
@@ -206,11 +259,11 @@ test('CLI removes malformed UTF-8 bytes without replacing a valid encoded U+FFFD
   assert.equal(previewData.site.title, 'Before(�After');
 });
 
-test('CLI streams WXR and atomically writes resolved base, report, then output', async (t) => {
+test('CLI with report streams WXR and atomically writes resolved base, report, then output', async (t) => {
   const fixture = await makeFixture(t);
   await fs.writeFile(fixture.output, '{"sentinel":true}\n');
 
-  const result = await executeCli(defaultArgs(), { cwd: fixture.root });
+  const result = await executeCli(reportArgs(), { cwd: fixture.root });
   assert.equal(result.code, 0, result.stderr);
 
   const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
@@ -250,12 +303,13 @@ test('CLI streams WXR and atomically writes resolved base, report, then output',
   await assertNoTemporaryFiles(fixture.root, fixture.artifactDir);
 });
 
-test('CLI uses an empty base when --base is omitted even if a resolved helper exists', async (t) => {
+test('CLI uses an empty base and leaves existing report artifacts untouched by default', async (t) => {
   const fixture = await makeFixture(t);
   await fs.mkdir(fixture.artifactDir);
+  const existingResolvedBase = `${JSON.stringify({ site: {}, widgets: {} }, null, 2)}\n`;
   await fs.writeFile(
     fixture.resolvedBaseArtifact,
-    `${JSON.stringify({ site: {}, widgets: {} }, null, 2)}\n`,
+    existingResolvedBase,
     'utf8',
   );
 
@@ -266,10 +320,11 @@ test('CLI uses an empty base when --base is omitted even if a resolved helper ex
   assert.equal(result.code, 0, result.stderr);
 
   const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
-  const resolvedBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
-  assert.equal(resolvedBase.version, '0.7');
   assert.deepEqual(previewData.widgets, defaultWidgets());
-  assert.deepEqual(resolvedBase.widgets, defaultWidgets());
+  assert.equal(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'), existingResolvedBase);
+  await assert.rejects(fs.stat(fixture.reportArtifact), { code: 'ENOENT' });
+  assert.doesNotMatch(result.stdout, /\nResolved base:/);
+  assert.doesNotMatch(result.stdout, /\nReport:/);
 
   const firstOutput = await fs.readFile(fixture.output);
   const second = await executeCli([
@@ -283,36 +338,98 @@ test('CLI uses an empty base when --base is omitted even if a resolved helper ex
   );
 });
 
-test('CLI keeps the report path reserved under --no-report', async (t) => {
-  const fixture = await makeFixture(t);
-  const result = await executeCli([
+test('CLI reserves report paths only when the report bundle is requested', async (t) => {
+  const withoutReport = await makeFixture(t);
+  const defaultResult = await executeCli([
     '--input', 'input.xml',
     '--base', 'wxr-import-base.json',
     '--output', '.zeropress-wxr-import/wxr-import-report.json',
-    '--no-report',
-  ], { cwd: fixture.root });
+  ], { cwd: withoutReport.root });
+  assert.equal(defaultResult.code, 0, defaultResult.stderr);
+  const previewData = JSON.parse(await fs.readFile(withoutReport.reportArtifact, 'utf8'));
+  assert.equal(previewData.content.posts.length, 1);
+  await assert.rejects(fs.stat(withoutReport.resolvedBaseArtifact), { code: 'ENOENT' });
+  assert.deepEqual(await fs.readdir(withoutReport.artifactDir), ['wxr-import-report.json']);
+  assert.doesNotMatch(defaultResult.stdout, /\nResolved base:/);
+  assert.doesNotMatch(defaultResult.stdout, /\nReport:/);
 
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /reportArtifact conflicts with output/);
-  await assert.rejects(fs.stat(fixture.artifactDir), { code: 'ENOENT' });
-  assert.deepEqual(JSON.parse(await fs.readFile(fixture.base, 'utf8')), minimalBase());
+  const withReport = await makeFixture(t);
+  const reportResult = await executeCli([
+    '--input', 'input.xml',
+    '--base', 'wxr-import-base.json',
+    '--output', '.zeropress-wxr-import/wxr-import-report.json',
+    '--with-report',
+  ], { cwd: withReport.root });
+  assert.equal(reportResult.code, 1);
+  assert.match(reportResult.stderr, /reportArtifact conflicts with output/);
+  await assert.rejects(fs.stat(withReport.artifactDir), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await fs.readFile(withReport.base, 'utf8')), minimalBase());
 });
 
-test('CLI omits report output but still writes the resolved base helper', async (t) => {
+test('CLI writes only the primary output by default', async (t) => {
   const fixture = await makeFixture(t);
-  const result = await executeCli([...defaultArgs(), '--no-report'], { cwd: fixture.root });
+  const result = await executeCli(defaultArgs(), { cwd: fixture.root });
 
   assert.equal(result.code, 0, result.stderr);
   await fs.stat(fixture.output);
-  await fs.stat(fixture.resolvedBaseArtifact);
-  await assert.rejects(fs.stat(fixture.reportArtifact), { code: 'ENOENT' });
-  assert.deepEqual(await fs.readdir(fixture.artifactDir), ['wxr-import-base.resolved.json']);
+  const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
+  const packageJson = JSON.parse(
+    await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+  assert.equal(previewData.generator, `zeropress-wxr-import v${packageJson.version}`);
+  await assert.rejects(fs.stat(fixture.artifactDir), { code: 'ENOENT' });
+  assert.doesNotMatch(result.stdout, /\nResolved base:/);
   assert.doesNotMatch(result.stdout, /\nReport:/);
+});
+
+test('CLI ignores an unsafe report directory unless the bundle is requested', async (t) => {
+  const fixture = await makeFixture(t);
+  const realArtifactDirectory = path.join(fixture.root, 'real-report-directory');
+  const sentinel = path.join(realArtifactDirectory, 'sentinel.txt');
+  await fs.mkdir(realArtifactDirectory);
+  await fs.writeFile(sentinel, 'keep me');
+  await fs.symlink(realArtifactDirectory, fixture.artifactDir);
+
+  const defaultResult = await executeCli(defaultArgs(), { cwd: fixture.root });
+  assert.equal(defaultResult.code, 0, defaultResult.stderr);
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'keep me');
+  assert.deepEqual(await fs.readdir(realArtifactDirectory), ['sentinel.txt']);
+
+  const reportResult = await executeCli([
+    '--input', 'input.xml',
+    '--base', 'wxr-import-base.json',
+    '--output', 'preview-data-second.json',
+    '--with-report',
+  ], { cwd: fixture.root });
+  assert.equal(reportResult.code, 1);
+  assert.match(reportResult.stderr, /artifact directory must not be a symbolic link/);
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'keep me');
+  await assert.rejects(
+    fs.stat(path.join(fixture.root, 'preview-data-second.json')),
+    { code: 'ENOENT' },
+  );
+});
+
+test('CLI can override only the generator version label with a complete SemVer value', async (t) => {
+  const fixture = await makeFixture(t);
+  const result = await executeCli([
+    ...defaultArgs(),
+    '--override-generator-version', '0.7.1',
+  ], { cwd: fixture.root });
+
+  assert.equal(result.code, 0, result.stderr);
+  const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
+  assert.equal(previewData.generator, 'zeropress-wxr-import v0.7.1');
+  assert.match(
+    result.stdout,
+    /Generator label: zeropress-wxr-import v0\.7\.1 \(overridden; CLI v\d+\.\d+\.\d+/,
+  );
+  await assert.rejects(fs.stat(fixture.artifactDir), { code: 'ENOENT' });
 });
 
 test('CLI rejects the generated resolved artifact as base without overwriting it', async (t) => {
   const fixture = await makeFixture(t);
-  const first = await executeCli(defaultArgs(), { cwd: fixture.root });
+  const first = await executeCli(reportArgs(), { cwd: fixture.root });
   assert.equal(first.code, 0, first.stderr);
   const firstBase = await fs.readFile(fixture.resolvedBaseArtifact);
 
@@ -320,6 +437,7 @@ test('CLI rejects the generated resolved artifact as base without overwriting it
     '--input', 'input.xml',
     '--base', '.zeropress-wxr-import/wxr-import-base.resolved.json',
     '--output', 'preview-data-second.json',
+    '--with-report',
   ], { cwd: fixture.root });
   assert.equal(second.code, 1);
   assert.match(second.stderr, /base conflicts with resolvedBaseArtifact/);
@@ -330,9 +448,9 @@ test('CLI rejects the generated resolved artifact as base without overwriting it
   );
 });
 
-test('CLI reuses a generated resolved base only after copying it to a separate base file', async (t) => {
+test('CLI reuses a generated resolved base with reports after copying it to a separate base file', async (t) => {
   const fixture = await makeFixture(t);
-  const first = await executeCli(defaultArgs(), { cwd: fixture.root });
+  const first = await executeCli(reportArgs(), { cwd: fixture.root });
   assert.equal(first.code, 0, first.stderr);
   const firstBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
   assert.deepEqual(firstBase.widgets, defaultWidgets());
@@ -344,6 +462,7 @@ test('CLI reuses a generated resolved base only after copying it to a separate b
     '--input', 'input.xml',
     '--base', 'wxr-import-base.json',
     '--output', 'preview-data-second.json',
+    '--with-report',
   ], { cwd: fixture.root });
   assert.equal(second.code, 0, second.stderr);
 
@@ -363,7 +482,7 @@ test('CLI preserves an explicit empty widgets object as a resolved opt-out', asy
   base.widgets = {};
   await fs.writeFile(fixture.base, `${JSON.stringify(base, null, 2)}\n`, 'utf8');
 
-  const result = await executeCli(defaultArgs(), { cwd: fixture.root });
+  const result = await executeCli(reportArgs(), { cwd: fixture.root });
   assert.equal(result.code, 0, result.stderr);
 
   const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
@@ -378,7 +497,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
   const source = 'https://blog.example/wp-content/uploads/';
   const destination = 'https://media.example/imported/';
 
-  const first = await executeCli(defaultArgs(), { cwd: fixture.root });
+  const first = await executeCli(reportArgs(), { cwd: fixture.root });
   assert.equal(first.code, 0, first.stderr);
   const firstOutput = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
   const firstBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
@@ -400,6 +519,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
     '--input', 'input.xml',
     '--base', 'wxr-import-base.json',
     '--output', 'preview-data-second.json',
+    '--with-report',
   ], { cwd: fixture.root });
   assert.equal(second.code, 0, second.stderr);
   const secondOutput = JSON.parse(await fs.readFile(secondOutputPath, 'utf8'));
@@ -414,6 +534,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
     '--input', 'input.xml',
     '--base', 'wxr-import-base.json',
     '--output', 'preview-data-third.json',
+    '--with-report',
   ], { cwd: fixture.root });
   assert.equal(third.code, 0, third.stderr);
   const thirdOutput = JSON.parse(await fs.readFile(thirdOutputPath, 'utf8'));
@@ -427,8 +548,8 @@ test('CLI reports warnings to stderr identically with and without a report file'
   const withReport = await makeFixture(t, warningWxr());
   const withoutReport = await makeFixture(t, warningWxr());
 
-  const reported = await executeCli(defaultArgs(), { cwd: withReport.root });
-  const unreported = await executeCli([...defaultArgs(), '--no-report'], { cwd: withoutReport.root });
+  const reported = await executeCli(reportArgs(), { cwd: withReport.root });
+  const unreported = await executeCli(defaultArgs(), { cwd: withoutReport.root });
   assert.equal(reported.code, 0, reported.stderr);
   assert.equal(unreported.code, 0, unreported.stderr);
 
@@ -451,8 +572,8 @@ test('CLI reports ambiguous timezone offsets identically with and without a repo
   const withReport = await makeFixture(t, ambiguousTimezoneWxr());
   const withoutReport = await makeFixture(t, ambiguousTimezoneWxr());
 
-  const reported = await executeCli(defaultArgs(), { cwd: withReport.root });
-  const unreported = await executeCli([...defaultArgs(), '--no-report'], { cwd: withoutReport.root });
+  const reported = await executeCli(reportArgs(), { cwd: withReport.root });
+  const unreported = await executeCli(defaultArgs(), { cwd: withoutReport.root });
   assert.equal(reported.code, 0, reported.stderr);
   assert.equal(unreported.code, 0, unreported.stderr);
   assert.deepEqual(warningLines(unreported.stderr), warningLines(reported.stderr));
@@ -468,6 +589,10 @@ function defaultArgs() {
     '--base', 'wxr-import-base.json',
     '--output', 'preview-data.json',
   ];
+}
+
+function reportArgs() {
+  return [...defaultArgs(), '--with-report'];
 }
 
 async function makeFixture(t, wxr = minimalWxr()) {

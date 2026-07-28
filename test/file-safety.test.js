@@ -110,6 +110,37 @@ test('validateFilePlan accepts an omitted optional base source', async (t) => {
   assert.equal(Object.hasOwn(result.identities, 'base'), false);
 });
 
+test('validateFilePlan does not reserve report paths when the bundle is omitted', async (t) => {
+  const root = await makeFixture(t);
+  const fullPlan = await makePlan(root);
+  const output = fullPlan.reportArtifact;
+  const plan = {
+    input: fullPlan.input,
+    base: fullPlan.base,
+    output,
+  };
+
+  const result = await validateFilePlan(plan);
+  assert.equal(result.output, output);
+  assert.equal(result.artifactDir, null);
+  assert.equal(result.resolvedBaseArtifact, null);
+  assert.equal(result.reportArtifact, null);
+  assert.deepEqual(Object.keys(result.identities), ['input', 'base', 'output']);
+
+  await assert.rejects(
+    validateFilePlan({ ...plan, artifactDir: fullPlan.artifactDir }),
+    /artifactDir requires resolved base and report artifact paths/,
+  );
+  await assert.rejects(
+    validateFilePlan({
+      ...plan,
+      artifactDir: fullPlan.artifactDir,
+      reportArtifact: fullPlan.reportArtifact,
+    }),
+    /Resolved base and report artifact paths must be configured together/,
+  );
+});
+
 test('artifact directories and write targets reject symbolic links without touching sentinels', async (t) => {
   const root = await makeFixture(t);
   const sentinel = path.join(root, 'sentinel.txt');

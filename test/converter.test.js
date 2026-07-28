@@ -6,7 +6,7 @@ import { convertWxrToPreviewData } from '../src/converter.js';
 
 test('converts published WXR content into valid preview-data', async () => {
   const { previewData, report, base: resolvedBase } = await convert(sampleWxr(), base(), {
-    packageVersion: '0.7.0',
+    generatorVersion: '0.7.0',
   });
 
   assert.equal(validatePreviewData(previewData).ok, true);

@@ -19,12 +19,14 @@ const OPTION_IDENTITIES = new Map([
   ['--input', '--input'],
   ['--base', '--base'],
   ['--output', '--output'],
-  ['--no-report', '--no-report'],
+  ['--with-report', '--with-report'],
+  ['--override-generator-version', '--override-generator-version'],
   ['--help', '--help'],
   ['-h', '--help'],
   ['--version', '--version'],
   ['-v', '--version'],
 ]);
+const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 export async function run(argv) {
   assertNoDuplicateOptions(argv);
@@ -45,23 +47,29 @@ export async function run(argv) {
   }
 
   const args = parseArgs(argv);
-  await validateFilePlan({
+  const filePlan = {
     input: args.input,
     base: args.base,
     output: args.output,
-    artifactDir: args.artifactDir,
-    resolvedBaseArtifact: args.resolvedBaseArtifact,
-    reportArtifact: args.reportArtifact,
-  });
+  };
+  if (args.withReport) {
+    Object.assign(filePlan, {
+      artifactDir: args.artifactDir,
+      resolvedBaseArtifact: args.resolvedBaseArtifact,
+      reportArtifact: args.reportArtifact,
+    });
+  }
+  await validateFilePlan(filePlan);
 
   const base = args.base
     ? await readBaseJsonFile(args.base)
     : { version: '0.7' };
+  const generatorVersion = args.generatorVersionOverride ?? PACKAGE_VERSION;
   const inputStream = createReadStream(args.input);
   let conversion;
   try {
     conversion = await convertWxrToPreviewData(inputStream, base, {
-      packageVersion: PACKAGE_VERSION,
+      generatorVersion,
     });
   } catch (error) {
     inputStream.destroy();
@@ -75,7 +83,9 @@ export async function run(argv) {
   printSummary({
     output: args.output,
     resolvedBasePath: args.resolvedBaseArtifact,
-    reportPath: args.writeReport ? args.reportArtifact : null,
+    reportPath: args.reportArtifact,
+    withReport: args.withReport,
+    generatorVersionOverride: args.generatorVersionOverride,
     report,
   });
   return 0;
@@ -87,16 +97,24 @@ export function parseArgs(argv) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--no-report') {
-      flags.noReport = true;
+    if (arg === '--with-report') {
+      flags.withReport = true;
       continue;
     }
-    if (arg === '--input' || arg === '--base' || arg === '--output') {
+    if (
+      arg === '--input'
+      || arg === '--base'
+      || arg === '--output'
+      || arg === '--override-generator-version'
+    ) {
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) {
         throw new Error(`Invalid arguments: ${arg} requires a value`);
       }
-      flags[arg.slice(2)] = value;
+      const key = arg === '--override-generator-version'
+        ? 'generatorVersionOverride'
+        : arg.slice(2);
+      flags[key] = value;
       index += 1;
       continue;
     }
@@ -115,19 +133,33 @@ export function parseArgs(argv) {
   if (path.extname(flags.output) !== '.json') {
     throw new Error('Invalid arguments: --output must be a file with a .json extension');
   }
+  if (
+    flags.generatorVersionOverride !== undefined
+    && !SEMVER_PATTERN.test(flags.generatorVersionOverride)
+  ) {
+    throw new Error(
+      'Invalid arguments: --override-generator-version must be a complete SemVer version without a leading "v"',
+    );
+  }
 
-  const artifactDir = path.join(process.cwd(), '.zeropress-wxr-import');
+  const withReport = flags.withReport === true;
+  const artifactDir = withReport
+    ? path.join(process.cwd(), '.zeropress-wxr-import')
+    : null;
 
   return {
     input: path.resolve(process.cwd(), flags.input),
     base: flags.base ? path.resolve(process.cwd(), flags.base) : null,
     output: path.resolve(process.cwd(), flags.output),
     artifactDir,
-    resolvedBaseArtifact: path.join(artifactDir, 'wxr-import-base.resolved.json'),
-    // The report path stays reserved for collision checks even when the report
-    // itself is not written, so it can never alias another artifact.
-    reportArtifact: path.join(artifactDir, 'wxr-import-report.json'),
-    writeReport: flags.noReport !== true,
+    resolvedBaseArtifact: artifactDir
+      ? path.join(artifactDir, 'wxr-import-base.resolved.json')
+      : null,
+    reportArtifact: artifactDir
+      ? path.join(artifactDir, 'wxr-import-report.json')
+      : null,
+    withReport,
+    generatorVersionOverride: flags.generatorVersionOverride ?? null,
   };
 }
 
@@ -147,17 +179,18 @@ function printHelp() {
   console.log(`zeropress-wxr-import - WordPress WXR to ZeroPress preview-data converter
 
 Usage:
-  zeropress-wxr-import --input <file> --output <file.json> [--base <file>] [--no-report]
+  zeropress-wxr-import --input <file> --output <file.json> [options]
 
 Required Options:
   --input <file>        WordPress WXR XML export file
   --output <file.json>  Output preview-data v0.7 JSON file
 
 Options:
-  --base <file>         Optional v0.7 JSON file containing site preset and import settings
-  --no-report           Do not write .zeropress-wxr-import/wxr-import-report.json
-  --help, -h            Show help
-  --version, -v         Show version
+  --base <file>                       Optional v0.7 JSON file containing site preset and import settings
+  --with-report                       Write the resolved base and import report JSON files
+  --override-generator-version <ver>  Override only the SemVer label in preview-data.generator
+  --help, -h                          Show help
+  --version, -v                       Show version
 
 Notes:
   - only published WordPress posts and pages are exported
@@ -190,10 +223,9 @@ async function readBaseJsonFile(filePath) {
 async function writeArtifactsAtomically({ args, previewData, report, resolvedBase }) {
   const stages = [];
   try {
-    await ensureSafeDirectory(args.artifactDir);
-
-    stages.push(await stageJsonFile(args.resolvedBaseArtifact, resolvedBase));
-    if (args.writeReport) {
+    if (args.withReport) {
+      await ensureSafeDirectory(args.artifactDir);
+      stages.push(await stageJsonFile(args.resolvedBaseArtifact, resolvedBase));
       stages.push(await stageJsonFile(args.reportArtifact, report));
     }
     stages.push(await stageJsonFile(args.output, previewData));
@@ -255,10 +287,25 @@ const EXCLUSION_SUMMARY_LABELS = Object.freeze([
   ['password_protected', 'Excluded password-protected items'],
 ]);
 
-function printSummary({ output, resolvedBasePath, reportPath, report }) {
+function printSummary({
+  output,
+  resolvedBasePath,
+  reportPath,
+  withReport,
+  generatorVersionOverride,
+  report,
+}) {
   console.log(formatWxrImportSuccessMessage());
   console.log(`Output: ${toTerminalSafeText(output)}`);
-  console.log(`Resolved base: ${toTerminalSafeText(resolvedBasePath)}`);
+  if (generatorVersionOverride) {
+    console.log(
+      `Generator label: zeropress-wxr-import v${generatorVersionOverride} `
+      + `(overridden; CLI v${PACKAGE_VERSION})`,
+    );
+  }
+  if (withReport) {
+    console.log(`Resolved base: ${toTerminalSafeText(resolvedBasePath)}`);
+  }
   console.log(`Posts: ${report.counts.posts}`);
   console.log(`Pages: ${report.counts.pages}`);
   console.log(`Categories: ${report.counts.categories}`);
@@ -270,7 +317,7 @@ function printSummary({ output, resolvedBasePath, reportPath, report }) {
       console.log(`${label}: ${count}`);
     }
   }
-  if (reportPath) {
+  if (withReport) {
     console.log(`Report: ${toTerminalSafeText(reportPath)}`);
   }
 }

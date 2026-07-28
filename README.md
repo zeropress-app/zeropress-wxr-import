@@ -7,8 +7,8 @@
 Public ZeroPress WordPress migration CLI for Preview Data v0.7.
 
 This package converts a WordPress WXR 1.2 export into canonical ZeroPress
-`preview-data` JSON, plus an editable base file that captures the values WXR
-cannot supply.
+`preview-data` JSON. An optional report bundle captures inferred settings,
+warnings, and the values WXR cannot supply.
 
 Public contract references:
 
@@ -45,7 +45,7 @@ npx @zeropress/build ./theme --data ./preview-data.json --out ./dist
 ## Usage
 
 ```bash
-zeropress-wxr-import --input <file> --output <file.json> [--base <file>] [--no-report]
+zeropress-wxr-import --input <file> --output <file.json> [options]
 ```
 
 ### Required Options
@@ -56,7 +56,9 @@ zeropress-wxr-import --input <file> --output <file.json> [--base <file>] [--no-r
 ### Other Options
 
 - `--base <file>`: Optional v0.7 JSON file containing site preset and import settings
-- `--no-report`: Do not write `.zeropress-wxr-import/wxr-import-report.json`
+- `--with-report`: Write the resolved base and import report JSON files
+- `--override-generator-version <version>`: Override only the SemVer label in
+  `preview-data.generator`
 - `--help, -h`: Show help
 - `--version, -v`: Show version
 
@@ -67,7 +69,15 @@ status 0. Explicit `--help`/`-h` and `--version`/`-v` requests are global and
 also exit with status 0 when combined with conversion options; help takes
 precedence when both are present. The output filename must use the lowercase
 `.json` extension. Every option may be declared only once; this includes
-`--no-report` and equivalent aliases such as `--help`/`-h`.
+`--with-report`, `--override-generator-version`, and equivalent aliases such as
+`--help`/`-h`.
+
+By default, `preview-data.generator` contains the installed package version.
+`--override-generator-version` accepts a complete SemVer value without a
+leading `v` and changes only that output label. It does not select an older
+converter, compatibility mode, or output policy. When an override is used, the
+success summary displays both the requested label and the actual CLI version.
+This option is intended for deliberately pinned, reproducible artifacts.
 
 ## Supported WXR input
 
@@ -96,16 +106,16 @@ build an XML DOM, although converted preview-data still uses memory proportional
 to the retained output. WordPress comments and unknown plugin metadata are not
 part of the preview-data contract and are discarded.
 
-## Helper artifacts and write safety
+## Optional report bundle and write safety
 
-The CLI writes fixed helper artifacts under the current working directory:
+The default conversion writes only the requested `--output` file and does not
+create or inspect `.zeropress-wxr-import/`. Pass `--with-report` to additionally
+write these fixed helper artifacts under the current working directory:
 
 - `.zeropress-wxr-import/wxr-import-base.resolved.json`
 - `.zeropress-wxr-import/wxr-import-report.json`
 
-Use `--no-report` to skip writing `wxr-import-report.json`. The report path
-remains reserved for collision checks, and warnings are still written to
-stderr. The resolved base is always written and references the canonical schema:
+The resolved base references the canonical schema:
 
 ```json
 {
@@ -115,18 +125,21 @@ stderr. The resolved base is always written and references the canonical schema:
 ```
 
 `wxr-import-base.resolved.json` is a generated snapshot, not a user-managed
-base file. Whenever it is written, an existing file at that path is replaced
-without confirmation. The CLI rejects using this artifact directly as
-`--base`; copy it to a separate path before editing or reusing it.
+base file. When `--with-report` is present, existing helper files are replaced
+without confirmation. The CLI rejects using the resolved artifact directly as
+`--base` in that mode because it would overwrite an active input; copy it to a
+separate path before editing or reusing it.
 
 Before reading input, the CLI checks canonical paths and existing file
-identities. The output cannot alias the input, an optional base, or any helper
-artifact. Symlinked helper directories and unsafe write targets are rejected.
+identities. The output cannot alias the input or an optional base. When the
+report bundle is requested, it also cannot alias either helper artifact, and
+symlinked helper directories and unsafe helper targets are rejected.
 
-Artifacts are first written to exclusive sibling temporary files, flushed, and
-then atomically renamed in resolved-base, report, and output order. The primary
-output is committed last as the success marker, and uncommitted temporary files
-are cleaned after success or failure.
+Configured artifacts are first written to exclusive sibling temporary files,
+flushed, and atomically renamed. With `--with-report`, the commit order is
+resolved base, report, and primary output. The primary output is always
+committed last as the success marker, and uncommitted temporary files are
+cleaned after success or failure.
 
 ## Base
 
@@ -190,6 +203,11 @@ To create a reusable base from a conversion, copy the generated snapshot to a
 separate file, edit the copy, and pass that file with `--base`:
 
 ```bash
+npx @zeropress/wxr-import \
+  --input wordpress-export.xml \
+  --output preview-data.json \
+  --with-report
+
 cp .zeropress-wxr-import/wxr-import-base.resolved.json ./wxr-import-base.json
 
 npx @zeropress/wxr-import \

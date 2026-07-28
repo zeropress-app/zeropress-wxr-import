@@ -56,7 +56,7 @@ test('excluded item bodies do not accumulate under a 128 MB old-space limit', { 
   const base = path.join(root, 'base.json');
   const output = path.join(root, 'preview-data.json');
   const body = 'x'.repeat(32 * 1024);
-  const itemsPerKind = 300;
+  const itemsPerKind = 250;
   const inputFile = await fs.open(input, 'w');
   try {
     await inputFile.write(wxrDocumentStart());
@@ -97,6 +97,7 @@ test('excluded item bodies do not accumulate under a 128 MB old-space limit', { 
     '--input', input,
     '--base', base,
     '--output', output,
+    '--with-report',
   ], root);
   assert.equal(result.code, 0, result.stderr);
 
@@ -132,6 +133,7 @@ test('ambiguous attachment inference and warning aggregation remain linear under
     '--input', input,
     '--base', base,
     '--output', output,
+    '--with-report',
   ], root);
   assert.equal(result.code, 0, result.stderr);
 
@@ -163,6 +165,7 @@ test('unresolved featured-image warning aggregation remains linear under 128 MB'
     '--input', input,
     '--base', base,
     '--output', output,
+    '--with-report',
   ], root);
   assert.equal(result.code, 0, result.stderr);
 

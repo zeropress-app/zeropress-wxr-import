@@ -4,9 +4,9 @@
 ![license](https://img.shields.io/npm/l/%40zeropress%2Fwxr-import)
 ![node](https://img.shields.io/node/v/%40zeropress%2Fwxr-import)
 
-Public ZeroPress WordPress migration CLI for Preview Data v0.7.
+ZeroPress CLI that converts WordPress WXR into Preview Data.
 
-This package converts a WordPress WXR 1.2 export into canonical ZeroPress
+This package converts a WordPress WXR export into canonical ZeroPress
 `preview-data` JSON. An optional report bundle captures inferred settings,
 warnings, and the values WXR cannot supply.
 

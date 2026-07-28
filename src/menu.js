@@ -1,4 +1,5 @@
 import { addWarning } from './report.js';
+import { compareLexically, compareWordPressIdStrings } from './compare.js';
 import { MAX_UNIQUE_NAME_ATTEMPTS, normalizeSlugSegment } from './slug.js';
 import { resolveNavigationUrl } from './url.js';
 import { itemCategories, postMetaValue, wpText } from './xml.js';
@@ -496,25 +497,7 @@ function normalizeMenuUrl(rawUrl, sourceOrigin, sourceBasePath, context) {
 function compareMenuItems(left, right) {
   return left.order - right.order
     || compareLexically(left.title, right.title)
-    || compareWordPressIds(left.wpId, right.wpId);
-}
-
-function compareWordPressIds(left, right) {
-  try {
-    const leftId = BigInt(left);
-    const rightId = BigInt(right);
-    if (leftId < rightId) return -1;
-    if (leftId > rightId) return 1;
-    return 0;
-  } catch {
-    return compareLexically(String(left), String(right));
-  }
-}
-
-function compareLexically(left, right) {
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
+    || compareWordPressIdStrings(left.wpId, right.wpId);
 }
 
 function invalidMenuUrlError({ menuName, raw }, rawUrl, reason) {

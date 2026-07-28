@@ -10,6 +10,7 @@ import {
   normalizeBase,
   PERMALINK_FIELDS,
 } from './base.js';
+import { compareLexically, compareWordPressIdStrings } from './compare.js';
 import { computeImportedPostExcerpt } from './excerpt.js';
 import { buildPreviewMenus, extractNavMenuItem, extractNavMenuTerms } from './menu.js';
 import {
@@ -378,12 +379,6 @@ function comparePostsByPublishedAtDesc(left, right) {
 
 function compareTermsByNameThenSlug(left, right) {
   return compareLexically(left.name, right.name) || compareLexically(left.slug, right.slug);
-}
-
-function compareLexically(left, right) {
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
 }
 
 function inferLocale(channel, report) {
@@ -1477,7 +1472,9 @@ function resolvePageHierarchy({ pageRecords, pagesByWpId, permalinkPolicy, repor
 }
 
 function allocateSiblingPageSegments(siblings, report) {
-  const ordered = [...siblings].sort((left, right) => compareWordPressIds(left.wpId, right.wpId));
+  const ordered = [...siblings].sort(
+    (left, right) => compareWordPressIdStrings(left.wpId, right.wpId),
+  );
   const firstBySlug = new Map();
   const used = new Set();
 
@@ -1502,12 +1499,6 @@ function allocateSiblingPageSegments(siblings, report) {
     used.add(candidate);
     addWarning(report, 'resolved_page_path_conflicts', record.wpId);
   }
-}
-
-// Page record ids always come from normalizeWordPressPublicId, so they are
-// safe positive integers and compare numerically.
-function compareWordPressIds(left, right) {
-  return Number(left) - Number(right);
 }
 
 function pageRoutePathForLineage(lineage, pattern) {

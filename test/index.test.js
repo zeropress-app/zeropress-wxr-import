@@ -371,7 +371,15 @@ test('CLI writes only the primary output by default', async (t) => {
   const result = await executeCli(defaultArgs(), { cwd: fixture.root });
 
   assert.equal(result.code, 0, result.stderr);
-  await fs.stat(fixture.output);
+  const outputFileSizeBytes = (await fs.stat(fixture.output)).size;
+  assert.match(
+    result.stdout,
+    new RegExp(
+      `\\nOutput FileSize: \\d+\\.\\d{2} MiB \\(${outputFileSizeBytes} bytes\\)\\n`,
+    ),
+  );
+  assert.match(result.stdout, /\nElapsed: \d+ms\n/);
+  assert.match(result.stdout, /\nPeak RSS: \d+\.\d MiB\n?$/);
   const previewData = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
   const packageJson = JSON.parse(
     await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'),

@@ -79,6 +79,10 @@ converter, compatibility mode, or output policy. When an override is used, the
 success summary displays both the requested label and the actual CLI version.
 This option is intended for deliberately pinned, reproducible artifacts.
 
+After a successful conversion, the summary also reports the exact output file
+size, elapsed processing time, and the Node.js process peak resident set size
+(`Peak RSS`). These diagnostic values do not affect generated artifacts.
+
 ## Supported WXR input
 
 The input must satisfy all of the following requirements:

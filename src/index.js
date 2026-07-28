@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { performance } from 'node:perf_hooks';
 import { convertWxrToPreviewData } from './converter.js';
 import { createColor } from './color.js';
 import { toTerminalSafeText } from './terminal.js';
@@ -47,6 +48,7 @@ export async function run(argv) {
   }
 
   const args = parseArgs(argv);
+  const startedAt = performance.now();
   const filePlan = {
     input: args.input,
     base: args.base,
@@ -78,6 +80,9 @@ export async function run(argv) {
   const { previewData, report, base: resolvedBase } = conversion;
 
   await writeArtifactsAtomically({ args, previewData, report, resolvedBase });
+  const outputFileSizeBytes = (await fs.stat(args.output)).size;
+  const elapsedMs = Math.round(performance.now() - startedAt);
+  const peakRssMiB = process.resourceUsage().maxRSS / 1024;
 
   printWarnings(report);
   printSummary({
@@ -87,6 +92,9 @@ export async function run(argv) {
     withReport: args.withReport,
     generatorVersionOverride: args.generatorVersionOverride,
     report,
+    outputFileSizeBytes,
+    elapsedMs,
+    peakRssMiB,
   });
   return 0;
 }
@@ -294,8 +302,12 @@ function printSummary({
   withReport,
   generatorVersionOverride,
   report,
+  outputFileSizeBytes,
+  elapsedMs,
+  peakRssMiB,
 }) {
   console.log(formatWxrImportSuccessMessage());
+  console.log('');
   console.log(`Output: ${toTerminalSafeText(output)}`);
   if (generatorVersionOverride) {
     console.log(
@@ -320,6 +332,13 @@ function printSummary({
   if (withReport) {
     console.log(`Report: ${toTerminalSafeText(reportPath)}`);
   }
+  console.log('');
+  console.log(
+    `Output FileSize: ${(outputFileSizeBytes / (1024 * 1024)).toFixed(2)} MiB `
+    + `(${outputFileSizeBytes} bytes)`,
+  );
+  console.log(`Elapsed: ${elapsedMs}ms`);
+  console.log(`Peak RSS: ${peakRssMiB.toFixed(1)} MiB`);
 }
 
 function nonNegativeCount(value) {

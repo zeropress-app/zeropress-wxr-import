@@ -62,6 +62,7 @@ export function buildPreviewMenus({
   categoriesByWpId,
   tagsByWpId,
   sourceOrigin,
+  sourceBasePath = '/',
   report,
 }) {
   terms = deduplicateNavMenuTerms(terms);
@@ -74,7 +75,7 @@ export function buildPreviewMenus({
   const assignedItems = [];
   for (const item of rawItems) {
     if (item.menuSlugs.length === 0) {
-      normalizeMenuUrl(item.url, sourceOrigin, {
+      normalizeMenuUrl(item.url, sourceOrigin, sourceBasePath, {
         menuName: '(unassigned)',
         raw: item,
       });
@@ -111,7 +112,7 @@ export function buildPreviewMenus({
     const menuName = term?.name || menuSlug;
     const menuRawItems = assignedItems
       .filter((item) => item.menuSlugs.includes(menuSlug))
-      .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
+      .sort(compareMenuItems);
     const convertedByWpId = new Map();
     const parentByWpId = new Map();
 
@@ -122,6 +123,7 @@ export function buildPreviewMenus({
         categoriesByWpId,
         tagsByWpId,
         sourceOrigin,
+        sourceBasePath,
         report,
         menuName,
       });
@@ -278,11 +280,17 @@ function convertMenuItem(raw, {
   categoriesByWpId,
   tagsByWpId,
   sourceOrigin,
+  sourceBasePath,
   report,
   menuName,
 }) {
   const explicitTitle = raw.title.trim();
-  const fallbackUrl = normalizeMenuUrl(raw.url, sourceOrigin, { menuName, raw });
+  const fallbackUrl = normalizeMenuUrl(
+    raw.url,
+    sourceOrigin,
+    sourceBasePath,
+    { menuName, raw },
+  );
 
   if (raw.itemType === 'custom') {
     if (explicitTitle && fallbackUrl) {
@@ -477,12 +485,36 @@ function menuItem(title, url, target, fallbackUrl = null) {
   };
 }
 
-function normalizeMenuUrl(rawUrl, sourceOrigin, context) {
-  const { url, reason } = resolveNavigationUrl(rawUrl, sourceOrigin);
+function normalizeMenuUrl(rawUrl, sourceOrigin, sourceBasePath, context) {
+  const { url, reason } = resolveNavigationUrl(rawUrl, sourceOrigin, sourceBasePath);
   if (reason) {
     throw invalidMenuUrlError(context, rawUrl, reason);
   }
   return url;
+}
+
+function compareMenuItems(left, right) {
+  return left.order - right.order
+    || compareLexically(left.title, right.title)
+    || compareWordPressIds(left.wpId, right.wpId);
+}
+
+function compareWordPressIds(left, right) {
+  try {
+    const leftId = BigInt(left);
+    const rightId = BigInt(right);
+    if (leftId < rightId) return -1;
+    if (leftId > rightId) return 1;
+    return 0;
+  } catch {
+    return compareLexically(String(left), String(right));
+  }
+}
+
+function compareLexically(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function invalidMenuUrlError({ menuName, raw }, rawUrl, reason) {

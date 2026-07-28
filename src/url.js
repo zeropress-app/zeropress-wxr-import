@@ -79,7 +79,7 @@ export function parseSafeHttpUrl(value) {
  * non-empty values include a stable, user-facing rejection reason so callers
  * can attach their own source context.
  */
-export function resolveNavigationUrl(value, sourceOrigin = '') {
+export function resolveNavigationUrl(value, sourceOrigin = '', sourceBasePath = '/') {
   const trimmed = String(value ?? '').trim();
   if (!trimmed) {
     return { url: null, reason: null };
@@ -93,14 +93,35 @@ export function resolveNavigationUrl(value, sourceOrigin = '') {
     return { url: `/${trimmed}`, reason: null };
   }
   if (trimmed.startsWith('/')) {
-    return { url: trimmed, reason: null };
+    return { url: stripSourceBasePathWithSuffix(trimmed, sourceBasePath), reason: null };
   }
 
   const parsed = parseSafeHttpUrl(trimmed);
   const url = sourceOrigin && parsed.origin === sourceOrigin
-    ? `${parsed.pathname || '/'}${parsed.search}${parsed.hash}`
+    ? `${stripSourceBasePath(parsed.pathname || '/', sourceBasePath)}${parsed.search}${parsed.hash}`
     : parsed.href;
   return { url, reason: null };
+}
+
+/**
+ * Remove the source WordPress blog pathname from a route-bound URL.
+ *
+ * Comments continue to use the complete WordPress source URL. This helper is
+ * only for paths that will be emitted as routes or navigation within the new
+ * root-hosted ZeroPress site.
+ */
+export function stripSourceBasePath(pathname, sourceBasePath = '/') {
+  const normalizedPath = String(pathname || '/');
+  const normalizedBase = normalizeSourceBasePath(sourceBasePath);
+  if (normalizedBase === '/') {
+    return normalizedPath;
+  }
+  if (normalizedPath === normalizedBase || normalizedPath === `${normalizedBase}/`) {
+    return '/';
+  }
+  return normalizedPath.startsWith(`${normalizedBase}/`)
+    ? normalizedPath.slice(normalizedBase.length)
+    : normalizedPath;
 }
 
 /**
@@ -178,6 +199,19 @@ function navigationUrlRejectionReason(value) {
     return 'expected an absolute HTTP(S) URL with a hostname';
   }
   return null;
+}
+
+function stripSourceBasePathWithSuffix(value, sourceBasePath) {
+  const suffixIndex = value.search(/[?#]/u);
+  const pathname = suffixIndex === -1 ? value : value.slice(0, suffixIndex);
+  const suffix = suffixIndex === -1 ? '' : value.slice(suffixIndex);
+  return `${stripSourceBasePath(pathname || '/', sourceBasePath)}${suffix}`;
+}
+
+function normalizeSourceBasePath(value) {
+  const pathname = String(value || '/');
+  const withoutTrailingSlash = pathname.replace(/\/+$/u, '');
+  return withoutTrailingSlash || '/';
 }
 
 function hasDotPathSegment(value) {

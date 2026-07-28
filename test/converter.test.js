@@ -164,8 +164,37 @@ test('infers post public_id permalinks from same-origin WXR links', async () => 
   assert.equal(report.inferred.permalinks.posts, '/post/:public_id');
 });
 
+test('strips the WordPress source subdirectory from inferred ZeroPress routes', async () => {
+  const source = sampleWxrWithPostIdPermalinks()
+    .replaceAll('https://old.example', 'https://old.example/site');
+  const baseData = baseWithoutPermalinks();
+  delete baseData.comments;
+  const { previewData, report } = await convert(source, baseData);
+
+  assert.equal(previewData.site.permalinks.posts, '/post/:public_id');
+  assert.equal(previewData.menus.primary.items[0].url, '/post/100');
+  assert.equal(
+    previewData.site.comments.api_base_url,
+    'https://old.example/site/wp-json/wp/v2',
+  );
+  assert.equal(
+    report.inferred.comments_api_base_url,
+    'https://old.example/site/wp-json/wp/v2',
+  );
+});
+
 test('normalizes same-origin custom menu URLs to root-relative URLs', async () => {
   const { previewData } = await convert(sampleWxrWithCustomMenus(), base());
+
+  assert.equal(previewData.menus.primary.items[0].url, '/');
+  assert.equal(previewData.menus.primary.items[1].url, '/about/?ref=menu#top');
+  assert.equal(previewData.menus.primary.items[2].url, 'https://external.example/path/');
+});
+
+test('strips the WordPress source subdirectory from custom menu URLs', async () => {
+  const source = sampleWxrWithCustomMenus()
+    .replaceAll('https://old.example', 'https://old.example/site');
+  const { previewData } = await convert(source, base());
 
   assert.equal(previewData.menus.primary.items[0].url, '/');
   assert.equal(previewData.menus.primary.items[1].url, '/about/?ref=menu#top');

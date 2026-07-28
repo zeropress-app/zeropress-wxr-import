@@ -25,7 +25,11 @@ import {
   slugFromText,
 } from './slug.js';
 import { addWarning, createReport } from './report.js';
-import { hasQueryOrFragment, parseSafeHttpUrl } from './url.js';
+import {
+  hasQueryOrFragment,
+  parseSafeHttpUrl,
+  stripSourceBasePath,
+} from './url.js';
 import {
   datePartsInTimeZone,
   formatUtcOffsetTimeZone,
@@ -69,7 +73,9 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   const channel = doc.channel;
   const generatedAt = parseRssPubDateToUtcSecondIso(directChildText(channel, 'pubDate'));
   if (!generatedAt) {
-    throw new Error('Invalid WXR input: channel pubDate must be a valid RFC 2822 date');
+    throw new Error(
+      'Invalid WXR input: channel pubDate must be a valid WordPress-style RFC 2822 date',
+    );
   }
   const packageVersion = options.packageVersion || '0.0.0';
   const report = createReport();
@@ -91,7 +97,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
     report,
   });
   const site = createSite(baseData.site, channel, effectiveMediaOrigin, effectiveTimeZone, report);
-  const sourceOrigin = inferWxrSourceOrigin(channel);
+  const sourceSite = inferWxrSourceSite(channel);
   if (baseData.meta !== undefined) {
     site.meta = structuredClone(baseData.meta);
   }
@@ -106,7 +112,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   if (baseData.newsletter !== undefined) {
     site.newsletter = baseData.newsletter;
   }
-  const inferredPermalinks = inferPermalinksFromItems(items, sourceOrigin, site.permalinks);
+  const inferredPermalinks = inferPermalinksFromItems(items, sourceSite, site.permalinks);
   const permalinkPolicy = canonicalizePermalinkPolicy(
     effectivePermalinkPolicy(site.permalinks, inferredPermalinks),
   );
@@ -280,7 +286,8 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
     pagesByWpId,
     categoriesByWpId,
     tagsByWpId,
-    sourceOrigin,
+    sourceOrigin: sourceSite.origin,
+    sourceBasePath: sourceSite.basePath,
     report,
   });
 
@@ -295,11 +302,13 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
     })),
     posts,
     pages,
-    categories: Array.from(categoriesBySlug.values()).map(({ name, slug, description }) => ({
-      name,
-      slug,
-      ...(description ? { description } : {}),
-    })),
+    categories: Array.from(categoriesBySlug.values())
+      .sort(compareTermsByNameThenSlug)
+      .map(({ name, slug, description }) => ({
+        name,
+        slug,
+        ...(description ? { description } : {}),
+      })),
     tags: Array.from(tagsBySlug.values())
       .sort(compareTermsByNameThenSlug)
       .map(({ name, slug, description }) => ({
@@ -362,7 +371,9 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
 }
 
 function comparePostsByPublishedAtDesc(left, right) {
-  return right.published_at_iso.localeCompare(left.published_at_iso);
+  if (left.published_at_iso < right.published_at_iso) return 1;
+  if (left.published_at_iso > right.published_at_iso) return -1;
+  return 0;
 }
 
 function compareTermsByNameThenSlug(left, right) {
@@ -575,43 +586,49 @@ function canonicalizePermalinkPolicy(permalinks) {
   return canonical;
 }
 
-function inferWxrSourceOrigin(channel) {
-  for (const value of [wpText(channel, 'base_blog_url'), wpText(channel, 'base_site_url'), directChildText(channel, 'link')]) {
-    const origin = originFromUrl(value);
-    if (origin) {
-      return origin;
-    }
+function inferWxrSourceSite(channel) {
+  const candidates = [
+    wpText(channel, 'base_blog_url'),
+    directChildText(channel, 'link'),
+    wpText(channel, 'base_site_url'),
+  ];
+  for (const value of candidates) {
+    const sourceUrl = normalizeWordPressSourceUrl(value);
+    if (!sourceUrl) continue;
+    const parsed = new URL(sourceUrl);
+    const basePath = parsed.pathname.replace(/\/+$/u, '') || '/';
+    return { origin: parsed.origin, basePath };
   }
-  return '';
+  return { origin: '', basePath: '/' };
 }
 
 function originFromUrl(value) {
   return parseSafeHttpUrl(String(value ?? '').trim())?.origin ?? '';
 }
 
-function inferPermalinksFromItems(items, sourceOrigin, explicitPermalinks) {
+function inferPermalinksFromItems(items, sourceSite, explicitPermalinks) {
   const explicit = isRecord(explicitPermalinks) ? explicitPermalinks : {};
   const inferred = {};
-  if (!sourceOrigin) {
+  if (!sourceSite.origin) {
     return inferred;
   }
 
   if (!explicit.posts) {
-    const posts = inferPermalinkPattern(items, sourceOrigin, 'post');
+    const posts = inferPermalinkPattern(items, sourceSite, 'post');
     if (posts) {
       inferred.posts = posts;
     }
   }
 
   if (!explicit.pages) {
-    const pages = inferPagePermalinkPattern(items, sourceOrigin);
+    const pages = inferPagePermalinkPattern(items, sourceSite);
     if (pages) {
       inferred.pages = pages;
     }
   }
 
   if (!explicit.output_style) {
-    const outputStyle = inferPermalinkOutputStyle(items, sourceOrigin);
+    const outputStyle = inferPermalinkOutputStyle(items, sourceSite);
     if (outputStyle) {
       inferred.output_style = outputStyle;
     }
@@ -620,7 +637,7 @@ function inferPermalinksFromItems(items, sourceOrigin, explicitPermalinks) {
   return inferred;
 }
 
-function inferPermalinkPattern(items, sourceOrigin, postType) {
+function inferPermalinkPattern(items, sourceSite, postType) {
   const candidates = [];
 
   for (const item of items) {
@@ -628,7 +645,7 @@ function inferPermalinkPattern(items, sourceOrigin, postType) {
       continue;
     }
 
-    const pathInfo = sameOriginPathInfo(directChildText(item, 'link'), sourceOrigin);
+    const pathInfo = sameOriginPathInfo(directChildText(item, 'link'), sourceSite);
     if (!pathInfo) {
       continue;
     }
@@ -651,7 +668,7 @@ function inferPermalinkPattern(items, sourceOrigin, postType) {
   return choosePermalinkPattern(candidates);
 }
 
-function inferPagePermalinkPattern(items, sourceOrigin) {
+function inferPagePermalinkPattern(items, sourceSite) {
   const recordsByWpId = new Map();
   const records = [];
 
@@ -666,7 +683,7 @@ function inferPagePermalinkPattern(items, sourceOrigin) {
       wpId: String(publicId),
       parentWpId: normalizeWordPressReferenceId(wpText(item, 'post_parent')),
       slug,
-      pathInfo: sameOriginPathInfo(directChildText(item, 'link'), sourceOrigin),
+      pathInfo: sameOriginPathInfo(directChildText(item, 'link'), sourceSite),
     };
     if (!recordsByWpId.has(record.wpId)) {
       recordsByWpId.set(record.wpId, record);
@@ -818,7 +835,7 @@ function choosePermalinkPattern(candidates) {
   return bestCount >= requiredCount ? best : null;
 }
 
-function inferPermalinkOutputStyle(items, sourceOrigin) {
+function inferPermalinkOutputStyle(items, sourceSite) {
   let directory = 0;
   let htmlExtension = 0;
 
@@ -827,7 +844,7 @@ function inferPermalinkOutputStyle(items, sourceOrigin) {
       continue;
     }
 
-    const pathInfo = sameOriginPathInfo(directChildText(item, 'link'), sourceOrigin);
+    const pathInfo = sameOriginPathInfo(directChildText(item, 'link'), sourceSite);
     if (!pathInfo || pathInfo.pathname === '/') {
       continue;
     }
@@ -845,14 +862,15 @@ function inferPermalinkOutputStyle(items, sourceOrigin) {
   return htmlExtension >= directory ? 'html-extension' : 'directory';
 }
 
-function sameOriginPathInfo(value, sourceOrigin) {
+function sameOriginPathInfo(value, sourceSite) {
   try {
     const parsed = new URL(String(value ?? '').trim());
-    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.origin !== sourceOrigin) {
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+      || parsed.origin !== sourceSite.origin) {
       return null;
     }
     return {
-      pathname: parsed.pathname || '/',
+      pathname: stripSourceBasePath(parsed.pathname || '/', sourceSite.basePath),
     };
   } catch {
     return null;

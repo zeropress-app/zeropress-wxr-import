@@ -15,8 +15,20 @@ import {
 
 const require = createRequire(import.meta.url);
 const { version: PACKAGE_VERSION } = require('../package.json');
+const OPTION_IDENTITIES = new Map([
+  ['--input', '--input'],
+  ['--base', '--base'],
+  ['--output', '--output'],
+  ['--no-report', '--no-report'],
+  ['--help', '--help'],
+  ['-h', '--help'],
+  ['--version', '--version'],
+  ['-v', '--version'],
+]);
 
 export async function run(argv) {
+  assertNoDuplicateOptions(argv);
+
   if (argv.length === 0) {
     printHelp();
     return 0;
@@ -70,6 +82,7 @@ export async function run(argv) {
 }
 
 export function parseArgs(argv) {
+  assertNoDuplicateOptions(argv);
   const flags = {};
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -116,6 +129,18 @@ export function parseArgs(argv) {
     reportArtifact: path.join(artifactDir, 'wxr-import-report.json'),
     writeReport: flags.noReport !== true,
   };
+}
+
+function assertNoDuplicateOptions(argv) {
+  const seen = new Set();
+  for (const argument of argv) {
+    const identity = OPTION_IDENTITIES.get(argument);
+    if (!identity) continue;
+    if (seen.has(identity)) {
+      throw new Error(`Invalid arguments: duplicate option ${identity}`);
+    }
+    seen.add(identity);
+  }
 }
 
 function printHelp() {

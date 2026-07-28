@@ -179,13 +179,22 @@ test('uses channel pubDate deterministically and rejects missing or invalid valu
   assert.equal(first.previewData.generated_at, '2026-07-15T09:00:00Z');
   assert.deepEqual(second.previewData, first.previewData);
 
+  const oneDigitDay = await convertDocument(
+    source.replace(
+      'Wed, 15 Jul 2026 18:00:00 +0900',
+      'Mon, 6 Jul 2026 18:00:00 +0900',
+    ),
+    {},
+  );
+  assert.equal(oneDigitDay.previewData.generated_at, '2026-07-06T09:00:00Z');
+
   await assert.rejects(
     () => convertDocument(source.replace(/\s*<pubDate>[^<]+<\/pubDate>/u, ''), {}),
-    /channel pubDate must be a valid RFC 2822 date/,
+    /channel pubDate must be a valid WordPress-style RFC 2822 date/,
   );
   await assert.rejects(
     () => convertDocument(source.replace('Wed, 15 Jul 2026', 'Tue, 15 Jul 2026'), {}),
-    /channel pubDate must be a valid RFC 2822 date/,
+    /channel pubDate must be a valid WordPress-style RFC 2822 date/,
   );
 });
 
@@ -1291,8 +1300,13 @@ test('allows category and tag terms to share the same normalized slug', async ()
   }]);
 });
 
-test('sorts global tags by name and slug while preserving each post WXR tag order', async () => {
+test('sorts global categories and tags while preserving each post WXR tag order', async () => {
   const xml = `
+    <wp:category><wp:term_id>130</wp:term_id><wp:category_nicename>zulu</wp:category_nicename><wp:cat_name>Zulu</wp:cat_name></wp:category>
+    <wp:category><wp:term_id>120</wp:term_id><wp:category_nicename>beta-slug</wp:category_nicename><wp:cat_name>Alpha</wp:cat_name></wp:category>
+    <wp:category><wp:term_id>110</wp:term_id><wp:category_nicename>alpha-slug</wp:category_nicename><wp:cat_name>Alpha</wp:cat_name></wp:category>
+    <wp:category><wp:term_id>140</wp:term_id><wp:category_nicename>middle</wp:category_nicename><wp:cat_name>Beta</wp:cat_name></wp:category>
+    <wp:category><wp:term_id>150</wp:term_id><wp:category_nicename>umlaut</wp:category_nicename><wp:cat_name>äther</wp:cat_name></wp:category>
     <wp:tag><wp:term_id>30</wp:term_id><wp:tag_slug>zulu</wp:tag_slug><wp:tag_name>Zulu</wp:tag_name></wp:tag>
     <wp:tag><wp:term_id>20</wp:term_id><wp:tag_slug>beta-slug</wp:tag_slug><wp:tag_name>Alpha</wp:tag_name></wp:tag>
     <wp:tag><wp:term_id>10</wp:term_id><wp:tag_slug>alpha-slug</wp:tag_slug><wp:tag_name>Alpha</wp:tag_name></wp:tag>
@@ -1311,15 +1325,20 @@ test('sorts global tags by name and slug while preserving each post WXR tag orde
     })}`;
   const { previewData } = await convert(xml, { site: {} });
 
+  const expectedCatalogOrder = [
+    ['Alpha', 'alpha-slug'],
+    ['Alpha', 'beta-slug'],
+    ['Beta', 'middle'],
+    ['Zulu', 'zulu'],
+    ['äther', 'umlaut'],
+  ];
+  assert.deepEqual(
+    previewData.content.categories.map(({ name, slug }) => [name, slug]),
+    expectedCatalogOrder,
+  );
   assert.deepEqual(
     previewData.content.tags.map(({ name, slug }) => [name, slug]),
-    [
-      ['Alpha', 'alpha-slug'],
-      ['Alpha', 'beta-slug'],
-      ['Beta', 'middle'],
-      ['Zulu', 'zulu'],
-      ['äther', 'umlaut'],
-    ],
+    expectedCatalogOrder,
   );
   assert.deepEqual(
     previewData.content.posts[0].tag_slugs,

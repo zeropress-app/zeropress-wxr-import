@@ -177,6 +177,23 @@ test('extracts navigation items from SAX compact item records', () => {
   });
 });
 
+test('sorts equal-order menu items lexically with a numeric WordPress ID tie-breaker', () => {
+  const menus = buildMenus({
+    rawItems: [
+      menuItem({ wpId: '4', title: 'Ärlig', order: 1 }),
+      menuItem({ wpId: '10', title: 'Same', order: 1 }),
+      menuItem({ wpId: '3', title: 'Zebra', order: 1 }),
+      menuItem({ wpId: '2', title: 'Same', order: 1 }),
+    ],
+    report: createReport(),
+  });
+
+  assert.deepEqual(
+    menus.primary.items.map((item) => item.url),
+    ['/menu/2', '/menu/10', '/menu/3', '/menu/4'],
+  );
+});
+
 test('rejects colliding inline menu assignments while allowing repeated references', () => {
   const first = extractNavMenuItem({
     title: 'First',

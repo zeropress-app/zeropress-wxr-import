@@ -9,7 +9,7 @@ export function parseWxrGmtDateTimeToUtcSecondIso(value) {
 
 export function parseRssPubDateToUtcSecondIso(value) {
   const trimmed = String(value ?? '').trim();
-  const match = /^(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?(\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4}) (\d{2}):(\d{2}):(\d{2}) (UT|GMT|[+-]\d{4})$/u.exec(trimmed);
+  const match = /^(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun), )?(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4}) (\d{2}):(\d{2}):(\d{2}) (UT|GMT|[+-]\d{4})$/u.exec(trimmed);
   if (!match) return null;
 
   const [, weekday, dayText, monthText, yearText, hourText, minuteText, secondText, zoneText] = match;

@@ -66,7 +66,8 @@ Running the command without arguments displays the help text and exits with
 status 0. Explicit `--help`/`-h` and `--version`/`-v` requests are global and
 also exit with status 0 when combined with conversion options; help takes
 precedence when both are present. The output filename must use the lowercase
-`.json` extension.
+`.json` extension. Every option may be declared only once; this includes
+`--no-report` and equivalent aliases such as `--help`/`-h`.
 
 ## Supported WXR input
 
@@ -76,7 +77,8 @@ The input must satisfy all of the following requirements:
 - exactly one direct `<channel>`;
 - the WordPress export namespace `http://wordpress.org/export/1.2/`;
 - a direct `wp:wxr_version` value of `1.2`; and
-- a direct, valid RFC 2822 `<pubDate>`.
+- a direct, valid WordPress-style RFC 2822 `<pubDate>` using a one- or two-digit
+  day and a numeric offset, `UT`, or `GMT`.
 
 After byte and control-character sanitization, malformed XML, DOCTYPE
 declarations, non-WXR XML, and WXR versions other than 1.2 are rejected instead
@@ -459,8 +461,9 @@ Successful automatic inference is also recorded as
   remain valid. A category and tag may share the same normalized slug.
 - Each Post's `tag_slugs` preserves the order of its WXR
   `<category domain="post_tag">` elements and removes later occurrences of the
-  same slug. The global `content.tags` catalog is instead sorted by name and
-  then slug using a locale-independent lexical comparison.
+  same slug. The global `content.categories` and `content.tags` catalogs are
+  instead sorted by name and then slug using a locale-independent lexical
+  comparison.
 - Distinct WordPress navigation menu slugs that normalize to the same slug
   fail the complete conversion and identify both menu sources. Identical
   repeated declarations of the same term ID, source slug, and name are
@@ -471,8 +474,11 @@ Successful automatic inference is also recorded as
   menu context instead of continuing indefinitely.
 - Menu item `type` is not emitted.
 - Datetimes are emitted as UTC seconds: `YYYY-MM-DDTHH:mm:ssZ`.
-- Custom menu URLs on the WXR source origin become root-relative URLs. External
-  HTTP(S) URLs are preserved.
+- Custom menu URLs on the WXR source origin become root-relative URLs. When the
+  source WordPress blog uses a subdirectory, that source-only pathname prefix is
+  removed from ZeroPress menu routes. External HTTP(S) URLs are preserved.
+- Fragment-only menu URLs such as `#` and `#section` are normalized to the safe
+  root-relative forms `/#` and `/#section`.
 - Every non-empty WXR menu URL must be a credential-free absolute HTTP(S) URL
   or a safe single-slash root-relative URL. Illegal values fail the complete
   conversion instead of being silently removed. This includes path traversal
@@ -521,6 +527,10 @@ always wins. Page inference treats the complete WordPress ancestor lineage as
 the `:slug` portion so hierarchy is not duplicated. Category and tag patterns
 are not inferred, so provide them when
 WordPress uses a custom taxonomy URL shape.
+The effective source blog pathname—selected from `wp:base_blog_url`, the channel
+link, then `wp:base_site_url`—is treated as a source installation prefix and
+removed from inferred ZeroPress routes. This does not affect the inferred
+WordPress comments API URL, which preserves the source subdirectory.
 The preview-data and resolved base always materialize the complete effective
 permalink policy. For readability, every pattern has exactly one trailing slash
 when `output_style` is `directory`, and no trailing slash when it is

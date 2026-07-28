@@ -51,6 +51,29 @@ test('parseArgs accepts an omitted base, validates output files, and reserves ev
   assert.equal(Object.hasOwn(args, 'schemaArtifact'), false);
 });
 
+test('rejects every duplicate CLI option declaration', async () => {
+  const duplicateCases = [
+    [['--input', 'a.xml', '--input', 'b.xml', '--output', 'out.json'], '--input'],
+    [['--input', 'a.xml', '--base', 'a.json', '--base', 'b.json', '--output', 'out.json'], '--base'],
+    [['--input', 'a.xml', '--output', 'a.json', '--output', 'b.json'], '--output'],
+    [['--input', 'a.xml', '--output', 'out.json', '--no-report', '--no-report'], '--no-report'],
+  ];
+  for (const [args, option] of duplicateCases) {
+    assert.throws(
+      () => parseArgs(args),
+      new RegExp(`Invalid arguments: duplicate option ${option}`),
+    );
+  }
+
+  const duplicateHelp = await executeCli(['--help', '-h']);
+  assert.equal(duplicateHelp.code, 1);
+  assert.match(duplicateHelp.stderr, /Invalid arguments: duplicate option --help/);
+
+  const duplicateVersion = await executeCli(['--version', '-v']);
+  assert.equal(duplicateVersion.code, 1);
+  assert.match(duplicateVersion.stderr, /Invalid arguments: duplicate option --version/);
+});
+
 test('CLI shows help and exits successfully when no arguments are provided', async () => {
   const noArguments = await executeCli([]);
   assert.equal(noArguments.code, 0);

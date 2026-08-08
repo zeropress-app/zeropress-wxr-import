@@ -394,12 +394,14 @@ function appendText(stack, text) {
 }
 
 function writeParserChunk(parser, chunk) {
-  const sanitized = stripNonPrintableAscii(chunk);
+  const sanitized = normalizeXmlLineEndings(stripNonPrintableAscii(chunk));
   if (sanitized) parser.write(sanitized);
 }
 
 function normalizeXmlLineEndings(value) {
-  return value.includes('\r') ? value.replace(/\r\n?/g, '\n') : value;
+  return /[\r\u2028\u2029]/.test(value)
+    ? value.replace(/\r\n?|[\u2028\u2029]/g, '\n')
+    : value;
 }
 
 function isElement(node, uri, local) {

@@ -27,6 +27,25 @@ test('strict streaming parser preserves UTF-8, tag, and CDATA data across arbitr
   assert.equal(actual.items[0].content, '<p>멀티바이트 본문 &amp; text</p>');
 });
 
+test('parser normalizes Unicode line separators to LF across byte boundaries', async () => {
+  const xml = wxrDocument(`
+    <item>
+      <title>Unicode separators</title>
+      <content:encoded><![CDATA[Before\u2028Middle\u2029After]]></content:encoded>
+      <wp:post_id>8</wp:post_id>
+      <wp:post_type>post</wp:post_type>
+      <wp:status>publish</wp:status>
+    </item>`);
+  const bytes = Buffer.from(xml, 'utf8');
+  const oneByteChunks = (async function* chunks() {
+    for (const byte of bytes) yield Uint8Array.of(byte);
+  }());
+
+  const document = await parseXml(oneByteChunks);
+
+  assert.equal(document.items[0].content, 'Before\nMiddle\nAfter');
+});
+
 test('parser removes malformed UTF-8 bytes and forbidden controls without removing valid U+FFFD', async () => {
   const prefix = Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
     <rss version="2.0" xmlns:wp="${WXR_NAMESPACE}">

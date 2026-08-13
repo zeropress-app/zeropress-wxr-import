@@ -129,6 +129,7 @@ export async function parseXml(source, options = {}) {
   };
 
   const decoder = createUtf8Sanitizer();
+  const inputSanitizer = createXmlInputSanitizer();
   let inputMode = null;
   try {
     for await (const chunk of source) {
@@ -137,7 +138,7 @@ export async function parseXml(source, options = {}) {
           throw new Error('Invalid WXR input: mixed string and byte chunks are not supported');
         }
         inputMode = 'string';
-        writeParserChunk(parser, chunk);
+        writeParserChunk(parser, inputSanitizer.write(chunk));
         continue;
       }
       if (!(chunk instanceof Uint8Array)) {
@@ -147,11 +148,12 @@ export async function parseXml(source, options = {}) {
         throw new Error('Invalid WXR input: mixed string and byte chunks are not supported');
       }
       inputMode = 'bytes';
-      writeParserChunk(parser, decoder.write(chunk));
+      writeParserChunk(parser, inputSanitizer.write(decoder.write(chunk)));
     }
     if (inputMode === 'bytes') {
-      writeParserChunk(parser, decoder.end());
+      writeParserChunk(parser, inputSanitizer.write(decoder.end()));
     }
+    writeParserChunk(parser, inputSanitizer.end());
     parser.close();
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Invalid WXR')) {
@@ -393,9 +395,38 @@ function appendText(stack, text) {
   frame.text.push(text);
 }
 
+function createXmlInputSanitizer() {
+  let pendingCarriageReturn = false;
+
+  return {
+    write(chunk) {
+      let value = stripNonPrintableAscii(chunk);
+      if (!value) return '';
+
+      let prefix = '';
+      if (pendingCarriageReturn) {
+        prefix = '\n';
+        pendingCarriageReturn = false;
+        if (value.startsWith('\n')) value = value.slice(1);
+      }
+
+      if (value.endsWith('\r')) {
+        value = value.slice(0, -1);
+        pendingCarriageReturn = true;
+      }
+
+      return prefix + normalizeXmlLineEndings(value);
+    },
+    end() {
+      if (!pendingCarriageReturn) return '';
+      pendingCarriageReturn = false;
+      return '\n';
+    },
+  };
+}
+
 function writeParserChunk(parser, chunk) {
-  const sanitized = normalizeXmlLineEndings(stripNonPrintableAscii(chunk));
-  if (sanitized) parser.write(sanitized);
+  if (chunk) parser.write(chunk);
 }
 
 function normalizeXmlLineEndings(value) {

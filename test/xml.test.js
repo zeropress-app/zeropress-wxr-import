@@ -46,6 +46,32 @@ test('parser normalizes Unicode line separators to LF across byte boundaries', a
   assert.equal(document.items[0].content, 'Before\nMiddle\nAfter');
 });
 
+test('parser normalizes CRLF once when CR and LF cross input chunk boundaries', async () => {
+  const xml = wxrDocument(`
+    <item>
+      <title>Line endings</title>
+      <content:encoded><![CDATA[Before\r\n\r\nMiddle\rAfter]]></content:encoded>
+      <wp:post_id>9</wp:post_id>
+      <wp:post_type>post</wp:post_type>
+      <wp:status>publish</wp:status>
+    </item>`);
+  const expected = await parseXml(Readable.from([xml]));
+  const bytes = Buffer.from(xml, 'utf8');
+  const oneByteChunks = (async function* chunks() {
+    for (const byte of bytes) yield Uint8Array.of(byte);
+  }());
+  const byteChunkResult = await parseXml(oneByteChunks);
+  const firstCrLf = xml.indexOf('\r\n');
+  const stringChunkResult = await parseXml(Readable.from([
+    xml.slice(0, firstCrLf + 1),
+    xml.slice(firstCrLf + 1),
+  ]));
+
+  assert.equal(expected.items[0].content, 'Before\n\nMiddle\nAfter');
+  assert.deepEqual(byteChunkResult, expected);
+  assert.deepEqual(stringChunkResult, expected);
+});
+
 test('parser removes malformed UTF-8 bytes and forbidden controls without removing valid U+FFFD', async () => {
   const prefix = Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
     <rss version="2.0" xmlns:wp="${WXR_NAMESPACE}">

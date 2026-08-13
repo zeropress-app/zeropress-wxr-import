@@ -370,7 +370,7 @@ function validateBasePreviewShape(baseData) {
     locale: 'en',
     posts_per_page: 10,
     date_style: 'medium',
-    time_style: 'short',
+    time_style: 'none',
     timezone: 'UTC',
     ...baseData.site,
   };

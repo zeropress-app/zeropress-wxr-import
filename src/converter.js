@@ -325,7 +325,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
     version: '0.7',
     generator: `zeropress-wxr-import v${generatorVersion}`,
     generated_at: generatedAt,
-    site,
+    site: createPreviewSite(site),
     content,
     ...(Object.keys(menus).length > 0 ? { menus } : {}),
   };
@@ -501,7 +501,7 @@ function createSite(baseSite, channel, mediaOrigin, timeZone, report) {
     locale: explicitLocale ? baseSite.locale : inferLocale(channel, report),
     posts_per_page: 10,
     date_style: 'medium',
-    time_style: 'short',
+    time_style: 'none',
     timezone: 'UTC',
     ...baseSite,
   };
@@ -579,6 +579,32 @@ function canonicalizePermalinkPolicy(permalinks) {
   }
 
   return canonical;
+}
+
+function createPreviewSite(site) {
+  const previewSite = { ...site };
+  const projectedPermalinks = projectPreviewPermalinks(site.permalinks);
+  if (projectedPermalinks) {
+    previewSite.permalinks = projectedPermalinks;
+  } else {
+    delete previewSite.permalinks;
+  }
+  return previewSite;
+}
+
+function projectPreviewPermalinks(permalinks) {
+  const projected = {};
+  if (permalinks.output_style !== DEFAULT_PERMALINKS.output_style) {
+    projected.output_style = permalinks.output_style;
+  }
+  for (const field of PERMALINK_FIELDS) {
+    const value = permalinks[field];
+    const defaultValue = DEFAULT_PERMALINKS[field];
+    if (value.replace(/\/+$/, '') !== defaultValue.replace(/\/+$/, '')) {
+      projected[field] = value;
+    }
+  }
+  return Object.keys(projected).length > 0 ? projected : undefined;
 }
 
 function inferWxrSourceSite(channel) {

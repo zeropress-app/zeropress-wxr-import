@@ -162,7 +162,7 @@ or default values, pass a base JSON file. A provided base must declare
     "locale": "en",
     "posts_per_page": 10,
     "date_style": "medium",
-    "time_style": "short",
+    "time_style": "none",
     "timezone": "UTC",
     "robots": { "allow_indexing": true },
     "search": { "enabled": true },
@@ -553,9 +553,11 @@ The effective source blog pathname—selected from `wp:base_blog_url`, the chann
 link, then `wp:base_site_url`—is treated as a source installation prefix and
 removed from inferred ZeroPress routes. This does not affect the inferred
 WordPress comments API URL, which preserves the source subdirectory.
-The preview-data and resolved base always materialize the complete effective
-permalink policy. For readability, every pattern has exactly one trailing slash
-when `output_style` is `directory`, and no trailing slash when it is
+The resolved base always materializes the complete effective permalink policy
+so it remains a useful editable helper. Final preview-data omits fields whose
+patterns match the Preview Data defaults and includes only effective overrides.
+For readability, every emitted or resolved pattern has exactly one trailing
+slash when `output_style` is `directory`, and no trailing slash when it is
 `html-extension`. This canonical spelling also applies to explicit patterns;
 it does not change the generated routes or accepted base-file syntax.
 Literal path and imported slug segments may contain isolated internal dots such

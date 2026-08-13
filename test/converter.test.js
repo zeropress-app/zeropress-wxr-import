@@ -136,29 +136,45 @@ test('resolves featured images even when attachment items appear later', async (
   assert.deepEqual(report.warnings.unresolved_featured_images, { count: 0, affected: [] });
 });
 
-test('uses ZeroPress default permalinks when base omits site.permalinks', async () => {
-  const { previewData, base: resolvedBase } = await convert(sampleWxr(), baseWithoutPermalinks());
+test('omits default permalinks from Preview while materializing the resolved base', async () => {
+  const baseData = baseWithoutPermalinks();
+  delete baseData.site.time_style;
+  const { previewData, base: resolvedBase } = await convert(sampleWxr(), baseData);
 
   assert.equal(previewData.content.posts[0].slug, 'imported-post');
   assert.equal(previewData.menus.primary.items[0].url, '/posts/imported-post/');
-  assert.deepEqual(previewData.site.permalinks, {
+  assert.equal(previewData.site.permalinks, undefined);
+  assert.equal(previewData.site.date_style, 'medium');
+  assert.equal(previewData.site.time_style, 'none');
+  assert.deepEqual(resolvedBase.site.permalinks, {
     output_style: 'directory',
     posts: '/posts/:slug/',
     pages: '/:slug/',
     categories: '/categories/:slug/',
     tags: '/tags/:slug/',
   });
-  assert.deepEqual(resolvedBase.site.permalinks, previewData.site.permalinks);
+  assert.equal(resolvedBase.site.date_style, 'medium');
+  assert.equal(resolvedBase.site.time_style, 'none');
 });
 
 test('infers post public_id permalinks from same-origin WXR links', async () => {
-  const { previewData, report } = await convert(sampleWxrWithPostIdPermalinks(), baseWithoutPermalinks());
+  const {
+    previewData,
+    report,
+    base: resolvedBase,
+  } = await convert(sampleWxrWithPostIdPermalinks(), baseWithoutPermalinks());
 
-  assert.equal(previewData.site.permalinks.output_style, 'html-extension');
-  assert.equal(previewData.site.permalinks.posts, '/post/:public_id');
-  assert.equal(previewData.site.permalinks.pages, '/:slug');
-  assert.equal(previewData.site.permalinks.categories, '/categories/:slug');
-  assert.equal(previewData.site.permalinks.tags, '/tags/:slug');
+  assert.deepEqual(previewData.site.permalinks, {
+    output_style: 'html-extension',
+    posts: '/post/:public_id',
+  });
+  assert.deepEqual(resolvedBase.site.permalinks, {
+    output_style: 'html-extension',
+    posts: '/post/:public_id',
+    pages: '/:slug',
+    categories: '/categories/:slug',
+    tags: '/tags/:slug',
+  });
   assert.equal(previewData.menus.primary.items[0].url, '/post/100');
   assert.equal(report.inferred.permalinks.output_style, 'html-extension');
   assert.equal(report.inferred.permalinks.posts, '/post/:public_id');

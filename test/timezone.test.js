@@ -324,7 +324,7 @@ test('keeps identity-only permalink inference without a local date and rejects u
     link: 'https://source.example/2026/date-looking/',
   }), { site: {} });
 
-  assert.equal(dateLooking.previewData.site.permalinks.posts, '/posts/:slug/');
+  assert.equal(dateLooking.previewData.site.permalinks, undefined);
   assert.equal(dateLooking.report.inferred.permalinks.posts, undefined);
 });
 

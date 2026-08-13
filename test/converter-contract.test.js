@@ -61,10 +61,10 @@ test('emits preview-data in canonical schema order independently of base key ord
       robots: { allow_indexing: true },
       permalinks: {
         output_style: 'directory',
-        posts: '/posts/:slug/',
-        pages: '/:slug/',
-        categories: '/categories/:slug/',
-        tags: '/tags/:slug/',
+        posts: '/journal/:slug/',
+        pages: '/docs/:slug/',
+        categories: '/topics/:slug/',
+        tags: '/labels/:slug/',
       },
       front_page: { type: 'theme_index' },
       post_index: { enabled: true, path: '/', paginate: true },
@@ -101,12 +101,12 @@ test('emits preview-data in canonical schema order independently of base key ord
       zeta: {
         title: 'Zeta',
         description: 'Zeta collection',
-        items: [{ type: 'page', path: 'zeta-page' }, { type: 'post', slug: 'alpha-post' }],
+        items: [{ type: 'page', path: 'docs/zeta-page' }, { type: 'post', slug: 'alpha-post' }],
       },
       alpha: {
         title: 'Alpha',
         description: 'Alpha collection',
-        items: [{ type: 'page', path: 'zeta-page' }, { type: 'post', slug: 'alpha-post' }],
+        items: [{ type: 'page', path: 'docs/zeta-page' }, { type: 'post', slug: 'alpha-post' }],
       },
     },
     custom_css: { content: 'body { color: black; }' },
@@ -139,7 +139,7 @@ test('emits preview-data in canonical schema order independently of base key ord
   ]);
   assert.deepEqual(Object.keys(previewData.site.comments.threading), ['enabled', 'max_depth']);
   assert.deepEqual(Object.keys(previewData.site.permalinks), [
-    'output_style', 'posts', 'pages', 'categories', 'tags',
+    'posts', 'pages', 'categories', 'tags',
   ]);
   assert.deepEqual(Object.keys(previewData.site.favicon), [
     'icon', 'icon_dark', 'svg', 'png', 'apple_touch_icon',
@@ -156,7 +156,7 @@ test('emits preview-data in canonical schema order independently of base key ord
   assert.deepEqual(Object.keys(previewData.collections.alpha.items[0]), ['type', 'path']);
   assert.deepEqual(
     previewData.collections.alpha.items.map((item) => item.path ?? item.slug),
-    ['zeta-page', 'alpha-post'],
+    ['docs/zeta-page', 'alpha-post'],
     'canonical key ordering must not reorder arrays',
   );
   assert.deepEqual(Object.keys(previewData.custom_html), ['head_end', 'body_end']);
@@ -444,7 +444,11 @@ test('canonicalizes all emitted permalink patterns to the effective output style
 
   for (const { outputStyle, input, expected, menuUrl } of cases) {
     const result = await convert(xml, { site: { permalinks: input } });
-    assert.deepEqual(result.previewData.site.permalinks, expected, outputStyle);
+    const expectedPreview = { ...expected };
+    if (expectedPreview.output_style === 'directory') {
+      delete expectedPreview.output_style;
+    }
+    assert.deepEqual(result.previewData.site.permalinks, expectedPreview, outputStyle);
     assert.deepEqual(result.base.site.permalinks, expected, outputStyle);
     assert.equal(result.previewData.menus.primary.items[0].url, menuUrl, outputStyle);
 

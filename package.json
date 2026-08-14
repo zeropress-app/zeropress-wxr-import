@@ -1,6 +1,6 @@
 {
   "name": "@zeropress/wxr-import",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "ZeroPress WXR to preview-data converter CLI",
   "type": "module",
   "license": "MIT",

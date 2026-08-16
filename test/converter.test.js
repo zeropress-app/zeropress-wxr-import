@@ -33,8 +33,8 @@ test('converts published WXR content into valid preview-data', async () => {
   assert.equal(previewData.content.pages[0].slug, 'test3');
   assert.equal(previewData.content.pages[1].slug, 'test3');
   assert.equal(previewData.content.pages[1].path, 'test3-102');
-  assert.equal(previewData.content.pages[0].excerpt, 'Page one');
-  assert.equal(previewData.content.pages[1].excerpt, 'Page two');
+  assert.equal(previewData.content.pages[0].excerpt, '');
+  assert.equal(previewData.content.pages[1].excerpt, '');
   assert.equal(previewData.content.pages[0].public_id, 101);
   assert.equal(Object.hasOwn(previewData.content.pages[0], 'meta'), false);
   assert.equal(previewData.content.pages[0].allow_comments, true);
@@ -119,14 +119,14 @@ test('sorts posts by published_at descending', async () => {
   );
 });
 
-test('builds post excerpt from WXR excerpt, SEO description, then content', async () => {
+test('builds post excerpt from WXR excerpt, then SEO description, without body fallback', async () => {
   const { previewData } = await convert(sampleWxrWithPostExcerptFallbacks(), base());
   const postsById = new Map(previewData.content.posts.map((post) => [post.public_id, post]));
 
   assert.equal(postsById.get(100).excerpt, 'Explicit WXR excerpt');
   assert.equal(postsById.get(200).excerpt, 'SEO plugin description');
   assert.equal(postsById.get(200).meta.description, 'SEO plugin description');
-  assert.equal(postsById.get(300).excerpt, 'Hello world with link & entities ©');
+  assert.equal(postsById.get(300).excerpt, '');
 });
 
 test('resolves featured images even when attachment items appear later', async () => {

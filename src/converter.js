@@ -1091,7 +1091,6 @@ function convertSharedDocumentFields({ item, publicId, contentType, rewrite, rep
     excerpt: computeImportedPostExcerpt({
       excerpt: rewriteMediaUrls(excerptText(item), rewrite),
       metaDescription,
-      content,
     }),
     thumbnailWpId: postMetaValue(item, '_thumbnail_id'),
     allowComments: resolveAllowComments(item, contentType, publicId, report),

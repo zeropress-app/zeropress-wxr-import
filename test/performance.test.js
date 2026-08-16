@@ -10,14 +10,14 @@ import { convertWxrToPreviewData } from '../src/converter.js';
 
 const BIN_PATH = fileURLToPath(new URL('../bin/zeropress-wxr-import.js', import.meta.url));
 
-test('2 MB adversarial unclosed raw-text element remains linear and hides its tail', { timeout: 30_000 }, async () => {
+test('2 MB adversarial body remains linear and does not become an excerpt', { timeout: 30_000 }, async () => {
   const content = `<p>Visible</p><script>${'</script "'.repeat(220_000)}`;
   const { previewData } = await convertWxrToPreviewData(
     Readable.from([wxrDocument(postItem(1, content))]),
     { version: '0.7', site: {} },
   );
 
-  assert.equal(previewData.content.posts[0].excerpt, 'Visible');
+  assert.equal(previewData.content.posts[0].excerpt, '');
 });
 
 test('large generated WXR converts, validates, and writes under a 128 MB old-space limit', { timeout: 30_000 }, async (t) => {

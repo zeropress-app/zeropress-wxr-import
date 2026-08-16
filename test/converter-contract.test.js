@@ -1350,7 +1350,7 @@ test('sorts global categories and tags while preserving each post WXR tag order'
   );
 });
 
-test('excerpt scanner hides unclosed script, style, and comment tails while preserving entity and whitespace policy', async () => {
+test('does not infer excerpts from body content, including malformed HTML', async () => {
   const xml = `
     ${postItem({ id: 1, slug: 'script', content: '<p>Hello&nbsp; world</p><script>hidden forever' })}
     ${postItem({ id: 2, slug: 'style', content: '<p>Visible</p><style>.secret {}</style><p>After</p>' })}
@@ -1365,17 +1365,7 @@ test('excerpt scanner hides unclosed script, style, and comment tails while pres
   const { previewData } = await convert(xml, { site: {} });
   const excerpts = new Map(previewData.content.posts.map((post) => [post.public_id, post.excerpt]));
 
-  assert.equal(excerpts.get(1), 'Hello world');
-  assert.equal(excerpts.get(2), 'Visible After');
-  assert.equal(excerpts.get(3), 'A B & C');
-  assert.equal(excerpts.get(4), 'Price < 10 and 2 > 1');
-  assert.equal(excerpts.get(5), 'Safe');
-  assert.equal(excerpts.get(6), `${'a'.repeat(160)}...`);
-  assert.equal(excerpts.get(7), `${'a'.repeat(159)}...`);
-  assert.doesNotMatch(excerpts.get(7), /[\uD800-\uDFFF]/);
-  assert.equal(excerpts.get(8), 'Keep <broken tail & words');
-  assert.equal(excerpts.get(9), 'Keep <! broken tail words');
-  assert.equal(excerpts.get(10), 'Keep <? broken tail words');
+  assert.deepEqual([...excerpts.values()], Array.from({ length: 10 }, () => ''));
 });
 
 function convert(channelChildren, base, options) {

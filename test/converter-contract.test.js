@@ -762,7 +762,7 @@ test('infers media_origin, keeps the resolved auto sentinel, and compacts featur
   assert.equal(previewData.site.media_origin, 'https://media.example');
   assert.equal(resolvedBase.site.media_origin, '');
   assert.equal(post.featured_image, '/wp-content/uploads/imported/hero.jpg');
-  assert.equal(post.content, `<img src="${destination}/hero.jpg">`);
+  assert.equal(post.content, `<p><img src="${destination}/hero.jpg"></p>`);
   assert.equal(post.meta.description, `${destination}/hero.jpg`);
   assert.equal(post.featured_image.includes('/imported/imported/'), false);
   assert.deepEqual(previewData.content.media, [{
@@ -859,7 +859,7 @@ test('infers an identity media pair only when every attachment has one safe Word
   assert.equal(previewData.site.media_origin, 'https://blog.example');
   assert.equal(resolvedBase.site.media_origin, '');
   assert.equal(previewData.content.posts[0].featured_image, '/wp-content/uploads/2025/hero.jpg');
-  assert.equal(previewData.content.posts[0].content, `<img src="${source}2025/hero.jpg">`);
+  assert.equal(previewData.content.posts[0].content, `<p><img src="${source}2025/hero.jpg"></p>`);
   assert.equal(report.inferred.media_prefix, source);
   assert.equal(report.inferred.media_origin, 'https://blog.example');
   assert.deepEqual(report.warnings.media_prefix_inference_skipped, { count: 0, affected: [] });
@@ -914,7 +914,7 @@ test('accepts an explicit identity media pair as a normalized runtime no-op', as
   assert.equal(previewData.site.media_origin, 'https://blog.example');
   assert.equal(resolvedBase.site.media_origin, '');
   assert.equal(previewData.content.posts[0].featured_image, '/wp-content/uploads/hero.jpg');
-  assert.equal(previewData.content.posts[0].content, `<img src="${url}">`);
+  assert.equal(previewData.content.posts[0].content, `<p><img src="${url}"></p>`);
   assert.equal(previewData.content.posts[0].meta.description, url);
   assert.equal(report.inferred.media_prefix, undefined);
 });
@@ -1013,7 +1013,7 @@ test('media rewrite preserves exact URL spelling while normalizing only the trai
 
   assert.equal(resolvedBase.import.media_from, `${source}/`);
   assert.equal(resolvedBase.import.media_to, `${destination}/`);
-  assert.equal(previewData.content.posts[0].content, `<img src="${destination}/image.jpg">`);
+  assert.equal(previewData.content.posts[0].content, `<p><img src="${destination}/image.jpg"></p>`);
 });
 
 test('media rewrite rejects missing, misspelled, relative, non-HTTP, credentialed, query, and fragment prefixes', async () => {

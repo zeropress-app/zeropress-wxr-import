@@ -468,6 +468,11 @@ Successful automatic inference is also recorded as
 - WordPress post IDs are preserved as `post.public_id`.
 - WordPress page IDs are used for deterministic path conflict handling and are
   preserved as `page.public_id`.
+- Classic WordPress body content is materialized before media rewriting:
+  blank lines become paragraphs and remaining authored line breaks become
+  explicit `<br />` elements. Multiline tag attributes and raw/preformatted
+  elements are preserved. Gutenberg `<!-- wp:... -->` content already declares
+  its own structure and bypasses this classic-content pass.
 - WordPress `wp:comment_status` maps exactly: `open` emits
   `allow_comments: true`; `closed` omits the field and therefore uses the
   Preview Data default of `false`. Missing or unknown values also fail closed,

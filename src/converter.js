@@ -50,6 +50,7 @@ import {
   postMetaValue,
   wpText,
 } from './xml.js';
+import { materializeWordPressClassicHtml } from './wordpress-content.js';
 
 const PREVIEW_DATA_SCHEMA_URL = 'https://schemas.zeropress.dev/preview-data/v0.7/schema.json';
 const DEFAULT_PERMALINKS = Object.freeze({
@@ -1081,7 +1082,10 @@ function convertSharedDocumentFields({ item, publicId, contentType, rewrite, rep
     firstPostMetaValue(item, SEO_DESCRIPTION_META_KEYS),
     rewrite,
   );
-  const content = rewriteMediaUrls(contentText(item), rewrite);
+  const content = rewriteMediaUrls(
+    materializeWordPressClassicHtml(contentText(item)),
+    rewrite,
+  );
 
   return {
     title,

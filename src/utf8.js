@@ -42,7 +42,8 @@ const UTF8_4_BYTE_HIGH_SEQUENCE = Object.freeze({
 });
 
 export function createUtf8Sanitizer() {
-  let pending = Buffer.alloc(0);
+  let pending = new Uint8Array(0);
+  const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 
   return {
     write(chunk) {
@@ -50,13 +51,16 @@ export function createUtf8Sanitizer() {
         throw new TypeError('UTF-8 sanitizer chunks must be bytes');
       }
 
-      const incoming = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-      const source = pending.length > 0
-        ? Buffer.concat([pending, incoming], pending.length + incoming.length)
-        : incoming;
-      pending = Buffer.alloc(0);
+      const incoming = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+      let source = incoming;
+      if (pending.length > 0) {
+        source = new Uint8Array(pending.length + incoming.length);
+        source.set(pending);
+        source.set(incoming, pending.length);
+      }
+      pending = new Uint8Array(0);
 
-      const output = Buffer.allocUnsafe(source.length);
+      const output = new Uint8Array(source.length);
       let inputOffset = 0;
       let outputOffset = 0;
 
@@ -82,20 +86,20 @@ export function createUtf8Sanitizer() {
           continue;
         }
         if (available < sequence.length) {
-          pending = Buffer.from(source.subarray(inputOffset));
+          pending = new Uint8Array(source.subarray(inputOffset));
           break;
         }
 
-        source.copy(output, outputOffset, inputOffset, inputOffset + sequence.length);
+        output.set(source.subarray(inputOffset, inputOffset + sequence.length), outputOffset);
         inputOffset += sequence.length;
         outputOffset += sequence.length;
       }
 
-      return output.subarray(0, outputOffset).toString('utf8');
+      return decoder.decode(output.subarray(0, outputOffset));
     },
 
     end() {
-      pending = Buffer.alloc(0);
+      pending = new Uint8Array(0);
       return '';
     },
   };

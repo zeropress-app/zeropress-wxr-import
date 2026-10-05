@@ -44,6 +44,28 @@ npx @zeropress/build ./theme --data ./preview-data.json --out ./dist
 
 ## Usage
 
+### JavaScript API
+
+The package also provides a file-system-independent API for Node.js and browser
+bundlers. Pass an async iterable of UTF-8 byte chunks or text chunks:
+
+```js
+import { convertWxrToPreviewData } from '@zeropress/wxr-import';
+
+const { previewData, base, report } = await convertWxrToPreviewData(
+  file.stream(),
+  { version: '0.7' },
+);
+```
+
+Here, `file` is a browser-selected `File`. For large files, run conversion in a
+Web Worker. The result still occupies memory proportional to the retained
+content. `validateBase(value)` validates and normalizes settings before
+conversion, and `converterVersion` exposes the installed converter version.
+The API performs no uploads, media downloads, or file writes.
+
+### CLI
+
 ```bash
 zeropress-wxr-import --input <file> --output <file.json> [options]
 ```

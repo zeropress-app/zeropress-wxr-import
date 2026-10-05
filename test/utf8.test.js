@@ -33,3 +33,17 @@ test('discards an incomplete UTF-8 sequence at end of input', () => {
   assert.equal(decoder.write(Buffer.from([0xe2, 0x82])), '');
   assert.equal(decoder.end(), '');
 });
+
+test('preserves byte order marks at each chunk boundary', () => {
+  const decoder = createUtf8Sanitizer();
+  assert.equal(decoder.write(new Uint8Array([0xef, 0xbb, 0xbf, 0x61])), '\uFEFFa');
+  assert.equal(decoder.write(new Uint8Array([0xef, 0xbb, 0xbf, 0x62])), '\uFEFFb');
+});
+
+test('retains a split sequence independently of the caller buffer', () => {
+  const decoder = createUtf8Sanitizer();
+  const first = new Uint8Array([0xe2, 0x82]);
+  assert.equal(decoder.write(first), '');
+  first.fill(0);
+  assert.equal(decoder.write(new Uint8Array([0xac])), '€');
+});

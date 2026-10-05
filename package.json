@@ -3,6 +3,8 @@
   "version": "0.7.2",
   "description": "ZeroPress WXR to preview-data converter CLI",
   "type": "module",
+  "main": "./src/api.js",
+  "types": "./src/api.d.ts",
   "license": "MIT",
   "bin": {
     "zeropress-wxr-import": "bin/zeropress-wxr-import.js"

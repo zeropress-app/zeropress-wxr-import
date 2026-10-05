@@ -1,5 +1,7 @@
 const MAX_SERIALIZED_DEPTH = 128;
 const MAX_SERIALIZED_ITEMS = 1_000_000;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 
 export function parseWordPressAttachmentMetadata(value) {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -36,7 +38,7 @@ function parseJsonMetadata(source) {
 }
 
 function parsePhpSerializedMetadata(source) {
-  const bytes = Buffer.from(source, 'utf8');
+  const bytes = encoder.encode(source);
   const root = readArrayHeader(bytes, 0);
   if (root.count > MAX_SERIALIZED_ITEMS) {
     throw new Error('Serialized attachment metadata has too many items');
@@ -137,7 +139,7 @@ function readString(bytes, offset) {
   expectByte(bytes, end + 1, 0x3b);
   return {
     type: 'string',
-    value: bytes.subarray(start, end).toString('utf8'),
+    value: decoder.decode(bytes.subarray(start, end)),
     next: end + 2,
   };
 }
@@ -259,7 +261,7 @@ function readAsciiUntil(bytes, offset, delimiter) {
   if (cursor >= bytes.length) {
     throw new Error('Unterminated serialized token');
   }
-  return { value: bytes.subarray(offset, cursor).toString('ascii'), next: cursor };
+  return { value: decoder.decode(bytes.subarray(offset, cursor)), next: cursor };
 }
 
 function expectByte(bytes, offset, expected) {

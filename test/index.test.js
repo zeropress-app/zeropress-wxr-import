@@ -30,7 +30,7 @@ test('parseArgs defaults to primary output only and accepts explicit report and 
 
   const withoutBase = parseArgs([
     '--input', 'a.xml',
-    '--output', 'preview-data.json',
+    '--output', 'zeropress-preview-data.json',
   ]);
   assert.equal(withoutBase.base, null);
   assert.equal(withoutBase.withReport, false);
@@ -42,7 +42,7 @@ test('parseArgs defaults to primary output only and accepts explicit report and 
   const args = parseArgs([
     '--input', 'a.xml',
     '--base', 'base.json',
-    '--output', 'preview-data.json',
+    '--output', 'zeropress-preview-data.json',
     '--with-report',
     '--override-generator-version', '0.7.1',
   ]);
@@ -316,7 +316,7 @@ test('CLI uses an empty base and leaves existing report artifacts untouched by d
 
   const result = await executeCli([
     '--input', 'input.xml',
-    '--output', 'preview-data.json',
+    '--output', 'zeropress-preview-data.json',
   ], { cwd: fixture.root });
   assert.equal(result.code, 0, result.stderr);
 
@@ -596,7 +596,7 @@ function defaultArgs() {
   return [
     '--input', 'input.xml',
     '--base', 'wxr-import-base.json',
-    '--output', 'preview-data.json',
+    '--output', 'zeropress-preview-data.json',
   ];
 }
 
@@ -613,7 +613,7 @@ async function makeFixture(t, wxr = minimalWxr()) {
     root,
     input: path.join(root, 'input.xml'),
     base: path.join(root, 'wxr-import-base.json'),
-    output: path.join(root, 'preview-data.json'),
+    output: path.join(root, 'zeropress-preview-data.json'),
     artifactDir,
     resolvedBaseArtifact: path.join(artifactDir, 'wxr-import-base.resolved.json'),
     reportArtifact: path.join(artifactDir, 'wxr-import-report.json'),

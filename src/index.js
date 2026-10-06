@@ -189,6 +189,9 @@ function printHelp() {
 Usage:
   zeropress-wxr-import --input <file> --output <file.json> [options]
 
+Example:
+  zeropress-wxr-import --input wordpress-export.xml --output zeropress-preview-data.json
+
 Required Options:
   --input <file>        WordPress WXR XML export file
   --output <file.json>  Output preview-data v0.7 JSON file

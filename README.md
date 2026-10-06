@@ -32,14 +32,14 @@ zeropress-wxr-import --help
 Convert a WordPress export into preview-data:
 
 ```bash
-npx @zeropress/wxr-import --input wordpress-export.xml --output preview-data.json
+npx @zeropress/wxr-import --input wordpress-export.xml --output zeropress-preview-data.json
 ```
 
 Build a static site from the result with
 [@zeropress/build](https://www.npmjs.com/package/@zeropress/build):
 
 ```bash
-npx @zeropress/build ./theme --data ./preview-data.json --out ./dist
+npx @zeropress/build ./theme --data ./zeropress-preview-data.json --out ./dist
 ```
 
 ## Usage
@@ -89,8 +89,9 @@ supplies site presets and import settings; omitting it starts from an empty base
 Running the command without arguments displays the help text and exits with
 status 0. Explicit `--help`/`-h` and `--version`/`-v` requests are global and
 also exit with status 0 when combined with conversion options; help takes
-precedence when both are present. The output filename must use the lowercase
-`.json` extension. Every option may be declared only once; this includes
+precedence when both are present. The examples use `zeropress-preview-data.json`;
+other filenames with the lowercase `.json` extension are also supported.
+Every option may be declared only once; this includes
 `--with-report`, `--override-generator-version`, and equivalent aliases such as
 `--help`/`-h`.
 
@@ -233,7 +234,7 @@ separate file, edit the copy, and pass that file with `--base`:
 ```bash
 npx @zeropress/wxr-import \
   --input wordpress-export.xml \
-  --output preview-data.json \
+  --output zeropress-preview-data.json \
   --with-report
 
 cp .zeropress-wxr-import/wxr-import-base.resolved.json ./wxr-import-base.json
@@ -241,7 +242,7 @@ cp .zeropress-wxr-import/wxr-import-base.resolved.json ./wxr-import-base.json
 npx @zeropress/wxr-import \
   --input wordpress-export.xml \
   --base ./wxr-import-base.json \
-  --output preview-data.json
+  --output zeropress-preview-data.json
 ```
 
 Before reading WXR, the importer validates every base value that is copied to

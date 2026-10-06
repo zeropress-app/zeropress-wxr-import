@@ -13,8 +13,8 @@ warnings, and the values WXR cannot supply.
 Public contract references:
 
 - [Preview Data v0.7 Spec](https://zeropress.dev/reference/preview-data/specs/v0.7/)
-- [Preview Data v0.7 Schema](https://schemas.zeropress.dev/preview-data/v0.7/schema.json)
-- [WXR Import Base v0.7 Schema](https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json)
+- [Preview Data v0.7 Schema](https://www.schemastore.org/zeropress-preview-data-0.7.json)
+- [WXR Import Base v0.7 Schema](https://www.schemastore.org/zeropress-wxr-import-base-0.7.json)
 
 ## Install
 
@@ -141,11 +141,12 @@ write these fixed helper artifacts under the current working directory:
 - `.zeropress-wxr-import/wxr-import-base.resolved.json`
 - `.zeropress-wxr-import/wxr-import-report.json`
 
-The resolved base references the canonical schema:
+The resolved base includes a versioned SchemaStore reference for editor
+completion and validation:
 
 ```json
 {
-  "$schema": "https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json",
+  "$schema": "https://www.schemastore.org/zeropress-wxr-import-base-0.7.json",
   "version": "0.7"
 }
 ```
@@ -175,6 +176,7 @@ or default values, pass a base JSON file. A provided base must declare
 
 ```json
 {
+  "$schema": "https://www.schemastore.org/zeropress-wxr-import-base-0.7.json",
   "version": "0.7",
   "site": {
     "title": "Imported Site",
@@ -219,10 +221,10 @@ or default values, pass a base JSON file. A provided base must declare
 }
 ```
 
-The canonical base schema is published at:
+The WXR Import Base JSON Schema is available from SchemaStore:
 
 ```text
-https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json
+https://www.schemastore.org/zeropress-wxr-import-base-0.7.json
 ```
 
 To create a reusable base from a conversion, copy the generated snapshot to a

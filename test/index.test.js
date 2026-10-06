@@ -270,12 +270,13 @@ test('CLI with report streams WXR and atomically writes resolved base, report, t
   const report = JSON.parse(await fs.readFile(fixture.reportArtifact, 'utf8'));
   const resolvedBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
 
+  assert.equal(previewData.$schema, 'https://www.schemastore.org/zeropress-preview-data-0.7.json');
   assert.equal(previewData.content.posts.length, 1);
   assert.equal(previewData.generated_at, '2026-07-15T09:00:00Z');
   assert.equal(report.counts.posts, 1);
   assert.equal(
     resolvedBase.$schema,
-    'https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json',
+    'https://www.schemastore.org/zeropress-wxr-import-base-0.7.json',
   );
   assert.equal(resolvedBase.version, '0.7');
   assert.equal(Object.hasOwn(previewData.site, 'datetime_display'), false);
@@ -624,7 +625,7 @@ async function makeFixture(t, wxr = minimalWxr()) {
 
 function minimalBase() {
   return {
-    $schema: 'https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json',
+    $schema: 'https://www.schemastore.org/zeropress-wxr-import-base-0.7.json',
     version: '0.7',
     site: {},
     import: {},

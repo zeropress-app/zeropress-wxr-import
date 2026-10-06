@@ -10,7 +10,7 @@ test('converts published WXR content into valid preview-data', async () => {
   });
 
   assert.equal(validatePreviewData(previewData).ok, true);
-  assert.equal(previewData.$schema, 'https://schemas.zeropress.dev/preview-data/v0.7/schema.json');
+  assert.equal(previewData.$schema, 'https://www.schemastore.org/zeropress-preview-data-0.7.json');
   assert.equal(previewData.version, '0.7');
   assert.equal(previewData.generator, 'zeropress-wxr-import v0.7.0');
   assert.equal(previewData.site.title, 'Base Title');
@@ -44,7 +44,7 @@ test('converts published WXR content into valid preview-data', async () => {
   assert.equal(previewData.menus.primary.items[0].type, undefined);
   assert.equal(
     resolvedBase.$schema,
-    'https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json',
+    'https://www.schemastore.org/zeropress-wxr-import-base-0.7.json',
   );
   assert.equal(resolvedBase.version, '0.7');
   assert.deepEqual(previewData.site.comments, {

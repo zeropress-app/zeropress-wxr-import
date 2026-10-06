@@ -10,7 +10,7 @@ import {
   parseSafeHttpUrl,
 } from './url.js';
 
-const BASE_SCHEMA_REFERENCE = 'https://schemas.zeropress.dev/wxr-import-base/v0.7/schema.json';
+const BASE_SCHEMA_REFERENCE = 'https://www.schemastore.org/zeropress-wxr-import-base-0.7.json';
 const CUSTOM_HTML_SLOT_MAX_CODE_POINTS = 65536;
 const BASE_PREFLIGHT_DEFERRED_ERROR_CODES = new Set([
   'INVALID_COLLECTION_ITEM_REFERENCE',

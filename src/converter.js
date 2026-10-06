@@ -52,7 +52,7 @@ import {
 } from './xml.js';
 import { materializeWordPressClassicHtml } from './wordpress-content.js';
 
-const PREVIEW_DATA_SCHEMA_URL = 'https://schemas.zeropress.dev/preview-data/v0.7/schema.json';
+const PREVIEW_DATA_SCHEMA_URL = 'https://www.schemastore.org/zeropress-preview-data-0.7.json';
 const DEFAULT_PERMALINKS = Object.freeze({
   output_style: 'directory',
   posts: '/posts/:slug/',

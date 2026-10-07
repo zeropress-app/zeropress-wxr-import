@@ -30,6 +30,7 @@ import {
   hasQueryOrFragment,
   parseSafeHttpUrl,
   stripSourceBasePath,
+  trimSlashes,
 } from './url.js';
 import {
   datePartsInTimeZone,
@@ -556,7 +557,7 @@ function normalizeWordPressSourceUrl(value) {
   if (!parsed || parsed.search || parsed.hash) {
     return '';
   }
-  parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/`;
+  parsed.pathname = `${trimSlashes(parsed.pathname, { leading: false })}/`;
   return parsed.toString();
 }
 
@@ -573,7 +574,7 @@ function canonicalizePermalinkPolicy(permalinks) {
   const canonical = { output_style: outputStyle };
 
   for (const field of PERMALINK_FIELDS) {
-    const withoutTrailingSlash = permalinks[field].replace(/\/+$/, '');
+    const withoutTrailingSlash = trimSlashes(permalinks[field], { leading: false });
     canonical[field] = outputStyle === 'directory'
       ? `${withoutTrailingSlash}/`
       : withoutTrailingSlash;
@@ -601,7 +602,7 @@ function projectPreviewPermalinks(permalinks) {
   for (const field of PERMALINK_FIELDS) {
     const value = permalinks[field];
     const defaultValue = DEFAULT_PERMALINKS[field];
-    if (value.replace(/\/+$/, '') !== defaultValue.replace(/\/+$/, '')) {
+    if (trimSlashes(value, { leading: false }) !== trimSlashes(defaultValue, { leading: false })) {
       projected[field] = value;
     }
   }
@@ -618,7 +619,7 @@ function inferWxrSourceSite(channel) {
     const sourceUrl = normalizeWordPressSourceUrl(value);
     if (!sourceUrl) continue;
     const parsed = new URL(sourceUrl);
-    const basePath = parsed.pathname.replace(/\/+$/u, '') || '/';
+    const basePath = trimSlashes(parsed.pathname, { leading: false }) || '/';
     return { origin: parsed.origin, basePath };
   }
   return { origin: '', basePath: '/' };
@@ -739,7 +740,7 @@ function pageInferenceLineage(record, recordsByWpId) {
 }
 
 function pagePermalinkPatternForPath(pathname, lineage) {
-  const body = String(pathname || '').replace(/^\/+|\/+$/g, '');
+  const body = trimSlashes(String(pathname || ''));
   if (!body || lineage.length === 0) return null;
   const segments = body.split('/').map((segment) => normalizeSlugSegment(safeDecodeURIComponent(segment)));
   if (segments.some((segment) => !segment)) return null;
@@ -760,7 +761,7 @@ function pagePermalinkPatternForPath(pathname, lineage) {
 }
 
 function permalinkPatternForPath(pathname, { postType, publicId, slug, localDateParts }) {
-  const body = String(pathname || '').replace(/^\/+|\/+$/g, '');
+  const body = trimSlashes(String(pathname || ''));
   if (!body) {
     return null;
   }
@@ -1490,7 +1491,7 @@ function resolvePageHierarchy({ pageRecords, pagesByWpId, permalinkPolicy, repor
       slug: record.page.slug,
     });
     if (!hasEquivalentPageFallbackRoute(routePath, fallbackRoutePath, permalinkPolicy.output_style)) {
-      record.page.path = normalizeRoutePath(routePath).replace(/^\/+|\/+$/g, '');
+      record.page.path = trimSlashes(normalizeRoutePath(routePath));
     }
     pagesByWpId.set(record.wpId, {
       slug: record.page.slug,
@@ -1531,7 +1532,7 @@ function allocateSiblingPageSegments(siblings, report) {
 }
 
 function pageRoutePathForLineage(lineage, pattern) {
-  const body = String(pattern || DEFAULT_PERMALINKS.pages).replace(/^\/+|\/+$/g, '');
+  const body = trimSlashes(String(pattern || DEFAULT_PERMALINKS.pages));
   const segments = body.split('/').flatMap((segment) => (segment === ':slug' ? lineage : [segment]));
   return `/${segments.join('/')}`;
 }
@@ -1638,7 +1639,7 @@ function routePathToOutputPath(routePath, outputStyle) {
     return 'index.html';
   }
   if (outputStyle === 'html-extension') {
-    return `${normalizedPath.replace(/^\/+|\/+$/g, '')}.html`;
+    return `${trimSlashes(normalizedPath)}.html`;
   }
   return `${normalizedPath.replace(/^\//, '')}index.html`;
 }
@@ -1651,7 +1652,7 @@ function hasEquivalentPageFallbackRoute(explicitRoutePath, fallbackRoutePath, ou
 }
 
 function normalizeRoutePath(routePath) {
-  const body = String(routePath || '').trim().replace(/^\/+|\/+$/g, '');
+  const body = trimSlashes(String(routePath || '').trim());
   return body ? `/${body}/` : '/';
 }
 

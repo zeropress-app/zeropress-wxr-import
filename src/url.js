@@ -12,6 +12,17 @@ const MALFORMED_PERCENT_ESCAPE_REGEX = /%(?![0-9A-Fa-f]{2})/u;
 const CREDENTIAL_AUTHORITY_REGEX = /^https?:\/\/[^/?#]*@/iu;
 const URL_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/u;
 
+// Scan the edges instead of backtracking through long internal slash runs.
+export function trimSlashes(value, { leading = true } = {}) {
+  let start = 0;
+  let end = value.length;
+  if (leading) {
+    while (start < end && value[start] === '/') start += 1;
+  }
+  while (end > start && value[end - 1] === '/') end -= 1;
+  return value.slice(start, end);
+}
+
 export function isHttpSchemeUrl(value) {
   return HTTP_SCHEME_REGEX.test(value);
 }
@@ -134,7 +145,7 @@ export function normalizeHttpUrlPrefix(value) {
   if (typeof value !== 'string' || hasQueryOrFragment(value) || !parseSafeHttpUrl(value)) {
     return null;
   }
-  return `${value.replace(/\/+$/u, '')}/`;
+  return `${trimSlashes(value, { leading: false })}/`;
 }
 
 /**
@@ -210,7 +221,7 @@ function stripSourceBasePathWithSuffix(value, sourceBasePath) {
 
 function normalizeSourceBasePath(value) {
   const pathname = String(value || '/');
-  const withoutTrailingSlash = pathname.replace(/\/+$/u, '');
+  const withoutTrailingSlash = trimSlashes(pathname, { leading: false });
   return withoutTrailingSlash || '/';
 }
 

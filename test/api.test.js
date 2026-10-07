@@ -21,6 +21,70 @@ test('public base validation preserves advanced settings and rejects generated s
   assert.throws(() => validateBase({ ...base, content: {} }), /content is generated/);
 });
 
+test('public base validation preserves comments URL spelling and root paths', () => {
+  for (const [input, expected] of [
+    ['/', '/'],
+    ['/wp-json//wp/v2///', '/wp-json//wp/v2'],
+    ['HTTPS://API.EXAMPLE:443/wp-json/%76%32///', 'HTTPS://API.EXAMPLE:443/wp-json/%76%32'],
+    ['https://api.example///', 'https://api.example'],
+  ]) {
+    const normalized = validateBase({ version: '0.7', comments: { api_base_url: input } });
+    assert.equal(normalized.comments.api_base_url, expected);
+  }
+  assert.throws(() => validateBase({ version: '0.7', comments: { api_base_url: '//' } }), /safe root-relative path/);
+});
+
+test('public base validation completes with long internal slash runs', () => {
+  assertApiCompletes(`
+    const path = '/a' + '/'.repeat(500_000) + 'b';
+    const source = 'HTTPS://SOURCE.EXAMPLE:443' + path;
+    const destination = 'https://cdn.example' + path;
+    for (const suffix of ['', '///']) {
+      const normalized = validateBase({
+        version: '0.7',
+        import: { media_from: source + suffix, media_to: destination + suffix },
+      });
+      assert.ok(normalized.import.media_from === source + '/', 'source prefix must retain its spelling');
+      assert.ok(normalized.import.media_to === destination + '/', 'destination prefix must end in one slash');
+      for (const endpoint of [source, path]) {
+        const comments = validateBase({ version: '0.7', comments: { api_base_url: endpoint + suffix } });
+        assert.ok(comments.comments.api_base_url === endpoint, 'comments URL must trim only trailing slashes');
+      }
+    }
+    assert.throws(() => validateBase({
+      version: '0.7', site: { permalinks: { posts: path + '/:slug/' } },
+    }), /non-empty path segments/);
+  `);
+});
+
+test('public conversion completes with long slash runs in base settings and WXR source URLs', () => {
+  assertApiCompletes(`
+    const document = ${JSON.stringify(xml)};
+    const source = 'https://blog.example/a' + '/'.repeat(500_000) + 'b';
+    const destination = 'https://cdn.example/uploads';
+    const explicit = await convertWxrToPreviewData(new Blob([document]).stream(), {
+      version: '0.7', import: { media_from: source, media_to: destination },
+    });
+    assert.ok(explicit.base.import.media_from === source + '/', 'base media prefix must be normalized');
+    assert.equal(explicit.base.import.media_to, destination + '/');
+
+    const wxr = document.replace('</channel>',
+      '<wp:base_blog_url>' + source + '///</wp:base_blog_url>' +
+      '<item><title>Entry</title><link>' + source + '/posts/entry/</link>' +
+      '<wp:post_id>1</wp:post_id><wp:post_type>post</wp:post_type>' +
+      '<wp:status>publish</wp:status><wp:post_name>entry</wp:post_name>' +
+      '<wp:post_date>2026-10-04 00:00:00</wp:post_date>' +
+      '<wp:post_date_gmt>2026-10-04 00:00:00</wp:post_date_gmt>' +
+      '<wp:post_modified_gmt>2026-10-04 00:00:00</wp:post_modified_gmt>' +
+      '</item></channel>');
+    const inferred = await convertWxrToPreviewData(new Blob([wxr]).stream());
+    assert.ok(inferred.previewData.site.comments.api_base_url === source + '/wp-json/wp/v2',
+      'inferred comments API must retain the WordPress subpath');
+    assert.equal(inferred.previewData.content.posts[0].slug, 'entry');
+    assert.equal(inferred.base.site.permalinks.posts, '/posts/:slug/');
+  `);
+});
+
 test('conversion and PHP metadata work without a Node Buffer global', () => {
   const apiUrl = new URL('../src/api.js', import.meta.url).href;
   const metadataUrl = new URL('../src/wordpress-attachment-metadata.js', import.meta.url).href;
@@ -36,3 +100,15 @@ test('conversion and PHP metadata work without a Node Buffer global', () => {
   `], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 });
+
+function assertApiCompletes(script) {
+  const apiUrl = new URL('../src/api.js', import.meta.url).href;
+  // A child-process timeout can stop a synchronous regex that blocks the event loop.
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { convertWxrToPreviewData, validateBase } from ${JSON.stringify(apiUrl)};
+    ${script}
+  `], { encoding: 'utf8', timeout: 10_000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+}

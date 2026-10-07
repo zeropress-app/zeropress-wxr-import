@@ -8,6 +8,7 @@ import {
   normalizeHttpOrigin,
   normalizeHttpUrlPrefix,
   parseSafeHttpUrl,
+  trimSlashes,
 } from './url.js';
 
 const BASE_SCHEMA_REFERENCE = 'https://www.schemastore.org/zeropress-wxr-import-base-0.7.json';
@@ -496,7 +497,7 @@ function validateBasePermalinkPattern(pattern, field) {
     throw new Error(`Invalid base JSON: ${path} must not contain a literal .html suffix`);
   }
 
-  const body = pattern.replace(/^\/+|\/+$/g, '');
+  const body = trimSlashes(pattern);
   const segments = body.split('/');
   if (!body || segments.some((segment) => segment === '')) {
     throw new Error(`Invalid base JSON: ${path} must contain non-empty path segments`);
@@ -597,13 +598,13 @@ function normalizeCommentsApiBaseUrl(value, path) {
     if (value.startsWith('//')) {
       throw new Error(`Invalid base JSON: ${path} must be a safe root-relative path without query or fragment`);
     }
-    return value === '/' ? '/' : value.replace(/\/+$/, '');
+    return value === '/' ? '/' : trimSlashes(value, { leading: false });
   }
 
   if (!parseSafeHttpUrl(value)) {
     throw new Error(`Invalid base JSON: ${path} must be HTTP(S) without credentials, query, or fragment`);
   }
-  return value.replace(/\/+$/, '');
+  return trimSlashes(value, { leading: false });
 }
 
 function validateOptionalBoolean(value, path) {

@@ -445,11 +445,13 @@ function buildMenus({
   rawItems,
   terms = [{ slug: 'primary', name: 'Primary', order: 0 }],
   tagsByWpId = new Map(),
+  menuMapping,
   report,
 }) {
   return buildPreviewMenus({
     terms,
     rawItems,
+    menuMapping,
     postsByWpId: new Map(),
     pagesByWpId: new Map(),
     categoriesByWpId: new Map(),
@@ -506,3 +508,28 @@ function collidingMenuIds(count) {
   }
   return { terms, rawItems };
 }
+
+
+test('maps selected WordPress term IDs to explicit slots and preserves nested items', () => {
+  const terms = [
+    { wpId: '12', slug: 'first', name: 'First', order: 0 },
+    { wpId: '34', slug: 'renamed-source', name: 'Renamed source', order: 1 },
+  ];
+  const rawItems = [
+    menuItem({ wpId: '1', menuSlugs: ['first'], title: 'First' }),
+    menuItem({ wpId: '2', menuSlugs: ['renamed-source'], title: 'Parent' }),
+    menuItem({ wpId: '3', parentWpId: '2', menuSlugs: ['renamed-source'], title: 'Child' }),
+  ];
+  const result = buildMenus({ terms, rawItems, menuMapping: { footer: '34', utility: '34' }, report: createReport() });
+  assert.deepEqual(Object.keys(result), ['footer', 'utility']);
+  assert.equal(result.footer.name, 'Renamed source');
+  assert.equal(result.footer.items[0].children[0].title, 'Child');
+  assert.deepEqual(result.footer, result.utility);
+  assert.deepEqual(buildMenus({ terms, rawItems, menuMapping: {}, report: createReport() }), {});
+});
+
+test('distinguishes an empty selected menu from a missing term ID', () => {
+  const terms = [{ wpId: '12', slug: 'empty', name: 'Empty', order: 0 }];
+  assert.deepEqual(buildMenus({ terms, rawItems: [], menuMapping: { primary: '12' }, report: createReport() }), {});
+  assert.throws(() => buildMenus({ terms, rawItems: [], menuMapping: { primary: '99' }, report: createReport() }), /menu mapping.*99/);
+});

@@ -57,6 +57,7 @@ const MAX_MENU_DEPTH = 10;
 
 export function buildPreviewMenus({
   terms,
+  menuMapping,
   rawItems,
   postsByWpId,
   pagesByWpId,
@@ -68,6 +69,14 @@ export function buildPreviewMenus({
 }) {
   terms = deduplicateNavMenuTerms(terms);
   validateNavMenuSlugSources(terms, rawItems);
+  const termByWpId = new Map(terms.filter((term) => term.wpId).map((term) => [term.wpId, term]));
+  if (menuMapping !== undefined) {
+    for (const [id, wpId] of Object.entries(menuMapping)) {
+      if (!termByWpId.has(wpId)) {
+        throw new Error(`Invalid WXR menu mapping: ${JSON.stringify(id)} references missing term ID ${JSON.stringify(wpId)}`);
+      }
+    }
+  }
 
   if (rawItems.length === 0) {
     return {};
@@ -104,11 +113,13 @@ export function buildPreviewMenus({
     }
   }
 
-  const menuIdBySlug = buildMenuIdAssignments(terms, activeMenuSlugs);
+  const assignments = menuMapping === undefined
+    ? [...buildMenuIdAssignments(terms, activeMenuSlugs)]
+    : Object.entries(menuMapping).map(([id, wpId]) => [termByWpId.get(wpId).slug, id]);
   const termBySlug = new Map(terms.map((term) => [term.slug, term]));
   const menus = {};
 
-  for (const [menuSlug, menuId] of menuIdBySlug) {
+  for (const [menuSlug, menuId] of assignments) {
     const term = termBySlug.get(menuSlug);
     const menuName = term?.name || menuSlug;
     const menuRawItems = assignedItems

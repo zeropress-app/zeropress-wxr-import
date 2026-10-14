@@ -284,6 +284,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
 
   const menus = buildPreviewMenus({
     terms: navMenuTerms,
+    menuMapping: baseData.import?.menu_mapping,
     rawItems: rawMenuItems,
     postsByWpId,
     pagesByWpId,
@@ -399,10 +400,7 @@ function inferLocale(channel, report) {
 
 function resolveMediaImport({ baseData, items, report }) {
   const importOptions = baseData.import;
-  const hasExplicitPair = isRecord(importOptions)
-    && Object.hasOwn(importOptions, 'media_from')
-    && Object.hasOwn(importOptions, 'media_to');
-  if (hasExplicitPair) {
+  if (isRecord(importOptions) && Object.hasOwn(importOptions, 'media_rewrites')) {
     return;
   }
 
@@ -435,8 +433,8 @@ function resolveMediaImport({ baseData, items, report }) {
   }
 
   baseData.import = {
-    media_from: inferredPrefix,
-    media_to: inferredPrefix,
+    ...baseData.import,
+    media_rewrites: [{ from: inferredPrefix, to: inferredPrefix }],
   };
   report.inferred.media_prefix = inferredPrefix;
 }
@@ -1290,7 +1288,7 @@ function resolveAttachmentSourceUrl(item, importOptions) {
   const attachmentUrl = normalizeAbsoluteMediaUrl(wpText(item, 'attachment_url'));
   if (attachmentUrl) return attachmentUrl;
 
-  if (!isRecord(importOptions) || typeof importOptions.media_from !== 'string') {
+  if (importOptions?.media_rewrites?.length !== 1) {
     return '';
   }
   const relativeFile = normalizeAttachmentRelativeFile(
@@ -1299,7 +1297,7 @@ function resolveAttachmentSourceUrl(item, importOptions) {
   if (!relativeFile) return '';
 
   try {
-    return normalizeAbsoluteMediaUrl(new URL(relativeFile, importOptions.media_from).toString());
+    return normalizeAbsoluteMediaUrl(new URL(relativeFile, importOptions.media_rewrites[0].from).toString());
   } catch {
     return '';
   }

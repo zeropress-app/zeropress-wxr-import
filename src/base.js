@@ -1,12 +1,12 @@
 import { isSafeSlugSegment } from '@zeropress/slug-policy';
 import { validatePreviewData } from '@zeropress/preview-data-validator';
 import { canonicalizeTimeZone } from './time.js';
+import { normalizeMediaRewriteOptions } from './media.js';
 import {
   hasCredentialAuthority,
   hasQueryOrFragment,
   hasUnsafeUrlCharacters,
   normalizeHttpOrigin,
-  normalizeHttpUrlPrefix,
   parseSafeHttpUrl,
   trimSlashes,
 } from './url.js';
@@ -226,14 +226,8 @@ export function normalizeBase(base) {
 }
 
 export function inferMediaOriginFromImport(importOptions) {
-  if (!isRecord(importOptions) || typeof importOptions.media_to !== 'string') {
-    return '';
-  }
-  try {
-    return new URL(importOptions.media_to).origin;
-  } catch {
-    return '';
-  }
+  const origins = new Set((importOptions?.media_rewrites ?? []).map(({ to }) => new URL(to).origin));
+  return origins.size === 1 ? [...origins][0] : '';
 }
 
 function validateBaseSite(site) {
@@ -451,25 +445,27 @@ function validateCustomHtml(customHtml) {
 
 function validateAndNormalizeImport(importOptions) {
   if (importOptions === undefined) return undefined;
-  validateClosedRecord(importOptions, 'import', ['media_from', 'media_to']);
-  const hasFrom = Object.hasOwn(importOptions, 'media_from');
-  const hasTo = Object.hasOwn(importOptions, 'media_to');
-  if (hasFrom !== hasTo) {
-    throw new Error('Invalid base JSON: import.media_from and import.media_to must be provided together');
+  validateClosedRecord(importOptions, 'import', ['media_rewrites', 'menu_mapping']);
+  const normalized = {};
+  if (Object.hasOwn(importOptions, 'media_rewrites')) {
+    normalized.media_rewrites = normalizeMediaRewriteOptions(importOptions);
   }
-  if (!hasFrom) return {};
-  return {
-    media_from: normalizeMediaPrefix(importOptions.media_from, 'import.media_from'),
-    media_to: normalizeMediaPrefix(importOptions.media_to, 'import.media_to'),
-  };
-}
-
-function normalizeMediaPrefix(value, path) {
-  const normalized = normalizeHttpUrlPrefix(value);
-  if (!normalized) {
-    throw new Error(
-      `Invalid base JSON: ${path} must be an absolute HTTP(S) URL prefix without credentials, query, or fragment`,
-    );
+  if (Object.hasOwn(importOptions, 'menu_mapping')) {
+    const mapping = importOptions.menu_mapping;
+    if (!isRecord(mapping)) {
+      throw new Error('Invalid base JSON: import.menu_mapping must be an object');
+    }
+    const entries = Object.entries(mapping).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    if (entries.length > 50) throw new Error('Invalid base JSON: import.menu_mapping allows at most 50 menus');
+    for (const [id, wpId] of entries) {
+      if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || ['constructor', 'prototype'].includes(id)) {
+        throw new Error(`Invalid base JSON: import.menu_mapping has an invalid menu ID ${JSON.stringify(id)}`);
+      }
+      if (typeof wpId !== 'string' || !/^[1-9][0-9]{0,19}$/.test(wpId)) {
+        throw new Error(`Invalid base JSON: import.menu_mapping.${id} must be a positive WordPress term ID string`);
+      }
+    }
+    normalized.menu_mapping = Object.fromEntries(entries);
   }
   return normalized;
 }

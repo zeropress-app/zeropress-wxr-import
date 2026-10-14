@@ -49,19 +49,16 @@ test('does not infer a prefix from empty, unsafe, or non-WordPress attachment UR
   }
 });
 
-test('treats normalized identity media options as an explicit no-op', () => {
-  assert.equal(
-    normalizeMediaRewriteOptions({
-      media_from: 'https://blog.example/wp-content/uploads',
-      media_to: 'https://blog.example/wp-content/uploads/',
-    }),
-    null,
+test('retains normalized identity rules as explicit exceptions', () => {
+  assert.deepEqual(
+    normalizeMediaRewriteOptions({ media_rewrites: [{ from: 'https://blog.example/wp-content/uploads', to: 'https://blog.example/wp-content/uploads/' }] }),
+    [{ from: 'https://blog.example/wp-content/uploads/', to: 'https://blog.example/wp-content/uploads/' }],
   );
 
-  const identity = {
+  const identity = [{
     from: 'https://blog.example/wp-content/uploads/',
     to: 'https://blog.example/wp-content/uploads/',
-  };
+  }];
   const content = '<img src="https://blog.example/wp-content/uploads/2025/hero.jpg">';
   const url = 'https://blog.example/wp-content/uploads/2025/hero.jpg';
 
@@ -69,16 +66,13 @@ test('treats normalized identity media options as an explicit no-op', () => {
   assert.equal(rewriteMediaUrl(url, identity), url);
 });
 
-test('keeps non-identity media rewriting unchanged', () => {
-  const rewrite = normalizeMediaRewriteOptions({
-    media_from: 'https://blog.example/wp-content/uploads',
-    media_to: 'https://media.example/imported',
-  });
+test('rewrites a media prefix and normalizes its trailing slash', () => {
+  const rewrite = normalizeMediaRewriteOptions({ media_rewrites: [{ from: 'https://blog.example/wp-content/uploads', to: 'https://media.example/imported' }] });
 
-  assert.deepEqual(rewrite, {
+  assert.deepEqual(rewrite, [{
     from: 'https://blog.example/wp-content/uploads/',
     to: 'https://media.example/imported/',
-  });
+  }]);
   assert.equal(
     rewriteMediaUrls(
       '<img src="https://blog.example/wp-content/uploads/2025/hero.jpg">',
@@ -93,10 +87,7 @@ test('keeps non-identity media rewriting unchanged', () => {
 });
 
 test('rewrites the exact source prefix once even when the original asset is under the destination path', () => {
-  const rewrite = normalizeMediaRewriteOptions({
-    media_from: 'https://blog.example/wp-content/uploads/',
-    media_to: 'https://blog.example/wp-content/uploads/imported/',
-  });
+  const rewrite = normalizeMediaRewriteOptions({ media_rewrites: [{ from: 'https://blog.example/wp-content/uploads/', to: 'https://blog.example/wp-content/uploads/imported/' }] });
   const sourceUrl = 'https://blog.example/wp-content/uploads/source.jpg';
   const destinationUrl = 'https://blog.example/wp-content/uploads/imported/already.jpg';
 
@@ -106,4 +97,26 @@ test('rewrites the exact source prefix once even when the original asset is unde
     rewriteMediaUrls(`<img src="${sourceUrl}"><img src="${destinationUrl}">`, rewrite),
     `<img src="https://blog.example/wp-content/uploads/imported/source.jpg"><img src="${nestedDestinationUrl}">`,
   );
+});
+
+
+test('applies longest matches once with identity exceptions and multiple sources', () => {
+  const rules = normalizeMediaRewriteOptions({ media_rewrites: [
+    { from: 'https://old.example/media', to: 'https://cdn.example/images' },
+    { from: 'https://older.example/media', to: 'https://cdn.example/images' },
+    { from: 'https://old.example/media/keep', to: 'https://old.example/media/keep' },
+    { from: 'https://cdn.example/images', to: 'https://final.example/images' },
+  ] });
+  assert.equal(rewriteMediaUrl('https://old.example/media/keep/a.png', rules), 'https://old.example/media/keep/a.png');
+  assert.equal(rewriteMediaUrl('https://older.example/media/a.png?x=1#view', rules), 'https://cdn.example/images/a.png?x=1#view');
+  assert.equal(rewriteMediaUrls('<img src="https://old.example/media/a.png"><img src="https://cdn.example/images/b.png">', rules),
+    '<img src="https://cdn.example/images/a.png"><img src="https://final.example/images/b.png">');
+  assert.equal(rewriteMediaUrl('https://old.example/media-other/a.png', rules), 'https://old.example/media-other/a.png');
+  assert.deepEqual(normalizeMediaRewriteOptions({ media_rewrites: [...rules].reverse() }), rules);
+});
+
+test('deduplicates identical sources and rejects conflicting destinations', () => {
+  const rule = { from: 'https://old.example/media/', to: 'https://cdn.example/images/' };
+  assert.deepEqual(normalizeMediaRewriteOptions({ media_rewrites: [rule, { ...rule }] }), [rule]);
+  assert.throws(() => normalizeMediaRewriteOptions({ media_rewrites: [rule, { ...rule, to: 'https://other.example/' }] }), /conflicting destinations/);
 });

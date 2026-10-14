@@ -510,7 +510,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
   assert.equal(first.code, 0, first.stderr);
   const firstOutput = JSON.parse(await fs.readFile(fixture.output, 'utf8'));
   const firstBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
-  assert.deepEqual(firstBase.import, { media_from: source, media_to: source });
+  assert.deepEqual(firstBase.import, { media_rewrites: [{ from: source, to: source  }] });
   assert.equal(firstBase.site.media_origin, '');
   assert.equal(firstOutput.site.media_origin, 'https://blog.example');
   assert.equal(firstOutput.content.posts[0].featured_image, '/wp-content/uploads/hero.jpg');
@@ -521,7 +521,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
     alt: 'Hero image',
   }]);
 
-  firstBase.import.media_to = destination;
+  firstBase.import.media_rewrites[0].to = destination;
   await fs.writeFile(fixture.base, `${JSON.stringify(firstBase, null, 2)}\n`, 'utf8');
   const secondOutputPath = path.join(fixture.root, 'preview-data-second.json');
   const second = await executeCli([
@@ -533,7 +533,7 @@ test('CLI persists inferred media settings and reuses them for an idempotent des
   assert.equal(second.code, 0, second.stderr);
   const secondOutput = JSON.parse(await fs.readFile(secondOutputPath, 'utf8'));
   const secondBase = JSON.parse(await fs.readFile(fixture.resolvedBaseArtifact, 'utf8'));
-  assert.deepEqual(secondBase.import, { media_from: source, media_to: destination });
+  assert.deepEqual(secondBase.import, { media_rewrites: [{ from: source, to: destination  }] });
   assert.equal(secondBase.site.media_origin, '');
   assert.equal(secondOutput.site.media_origin, 'https://media.example');
   assert.equal(secondOutput.content.posts[0].featured_image, '/imported/hero.jpg');

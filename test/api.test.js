@@ -42,10 +42,10 @@ test('public base validation completes with long internal slash runs', () => {
     for (const suffix of ['', '///']) {
       const normalized = validateBase({
         version: '0.7',
-        import: { media_from: source + suffix, media_to: destination + suffix },
+        import: { media_rewrites: [{ from: source + suffix, to: destination + suffix  }] },
       });
-      assert.ok(normalized.import.media_from === source + '/', 'source prefix must retain its spelling');
-      assert.ok(normalized.import.media_to === destination + '/', 'destination prefix must end in one slash');
+      assert.ok(normalized.import.media_rewrites[0].from === source + '/', 'source prefix must retain its spelling');
+      assert.ok(normalized.import.media_rewrites[0].to === destination + '/', 'destination prefix must end in one slash');
       for (const endpoint of [source, path]) {
         const comments = validateBase({ version: '0.7', comments: { api_base_url: endpoint + suffix } });
         assert.ok(comments.comments.api_base_url === endpoint, 'comments URL must trim only trailing slashes');
@@ -63,10 +63,10 @@ test('public conversion completes with long slash runs in base settings and WXR 
     const source = 'https://blog.example/a' + '/'.repeat(500_000) + 'b';
     const destination = 'https://cdn.example/uploads';
     const explicit = await convertWxrToPreviewData(new Blob([document]).stream(), {
-      version: '0.7', import: { media_from: source, media_to: destination },
+      version: '0.7', import: { media_rewrites: [{ from: source, to: destination  }] },
     });
-    assert.ok(explicit.base.import.media_from === source + '/', 'base media prefix must be normalized');
-    assert.equal(explicit.base.import.media_to, destination + '/');
+    assert.ok(explicit.base.import.media_rewrites[0].from === source + '/', 'base media prefix must be normalized');
+    assert.equal(explicit.base.import.media_rewrites[0].to, destination + '/');
 
     const wxr = document.replace('</channel>',
       '<wp:base_blog_url>' + source + '///</wp:base_blog_url>' +

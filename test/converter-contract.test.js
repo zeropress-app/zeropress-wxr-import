@@ -750,15 +750,12 @@ test('infers media_origin, keeps the resolved auto sentinel, and compacts featur
     })}`;
   const { previewData, base: resolvedBase } = await convert(xml, {
     site: {},
-    import: {
-      media_from: source,
-      media_to: destination,
-    },
+    import: { media_rewrites: [{ from: source, to: destination }] },
   });
   const post = previewData.content.posts[0];
 
-  assert.equal(resolvedBase.import.media_from, `${source}/`);
-  assert.equal(resolvedBase.import.media_to, `${destination}/`);
+  assert.equal(resolvedBase.import.media_rewrites[0].from, `${source}/`);
+  assert.equal(resolvedBase.import.media_rewrites[0].to, `${destination}/`);
   assert.equal(previewData.site.media_origin, 'https://media.example');
   assert.equal(resolvedBase.site.media_origin, '');
   assert.equal(post.featured_image, '/wp-content/uploads/imported/hero.jpg');
@@ -788,7 +785,7 @@ test('uses a safe attached-file fallback and omits unreferenced or dimensionless
     ${postItem({ id: 4, slug: 'malformed-absolute', postmeta: [['_thumbnail_id', '94']] })}`;
   const { previewData, report } = await convert(xml, {
     site: {},
-    import: { media_from: source, media_to: destination },
+    import: { media_rewrites: [{ from: source, to: destination  }] },
   });
 
   assert.deepEqual(previewData.content.posts.map((post) => post.featured_image), [
@@ -852,10 +849,7 @@ test('infers an identity media pair only when every attachment has one safe Word
     })}`;
   const { previewData, base: resolvedBase, report } = await convert(xml, { site: {} });
 
-  assert.deepEqual(resolvedBase.import, {
-    media_from: source,
-    media_to: source,
-  });
+  assert.deepEqual(resolvedBase.import, { media_rewrites: [{ from: source, to: source }] });
   assert.equal(previewData.site.media_origin, 'https://blog.example');
   assert.equal(resolvedBase.site.media_origin, '');
   assert.equal(previewData.content.posts[0].featured_image, '/wp-content/uploads/2025/hero.jpg');
@@ -903,14 +897,11 @@ test('accepts an explicit identity media pair as a normalized runtime no-op', as
     })}`,
     {
       site: {},
-      import: { media_from: source, media_to: `${source}/` },
+      import: { media_rewrites: [{ from: source, to: `${source}/` }] },
     },
   );
 
-  assert.deepEqual(resolvedBase.import, {
-    media_from: `${source}/`,
-    media_to: `${source}/`,
-  });
+  assert.deepEqual(resolvedBase.import, { media_rewrites: [{ from: `${source}/`, to: `${source}/` }] });
   assert.equal(previewData.site.media_origin, 'https://blog.example');
   assert.equal(resolvedBase.site.media_origin, '');
   assert.equal(previewData.content.posts[0].featured_image, '/wp-content/uploads/hero.jpg');
@@ -931,7 +922,7 @@ test('preserves an explicit media_origin and keeps cross-origin featured media a
     })}`,
     {
       site: { media_origin: explicitOrigin },
-      import: { media_from: source, media_to: destination },
+      import: { media_rewrites: [{ from: source, to: destination  }] },
     },
   );
 
@@ -966,14 +957,14 @@ test('reuses the inferred resolved base and remains idempotent after selecting a
   })}`;
 
   const first = await convert(xml, { site: {} });
-  assert.deepEqual(first.base.import, { media_from: source, media_to: source });
+  assert.deepEqual(first.base.import, { media_rewrites: [{ from: source, to: source  }] });
   assert.equal(first.previewData.site.media_origin, 'https://blog.example');
   assert.equal(first.base.site.media_origin, '');
 
   const selectedBase = structuredClone(first.base);
-  selectedBase.import.media_to = destination;
+  selectedBase.import.media_rewrites[0].to = destination;
   const second = await convert(xml, selectedBase);
-  assert.deepEqual(second.base.import, { media_from: source, media_to: destination });
+  assert.deepEqual(second.base.import, { media_rewrites: [{ from: source, to: destination  }] });
   assert.equal(second.previewData.site.media_origin, 'https://media.example');
   assert.equal(second.base.site.media_origin, '');
   assert.equal(second.previewData.content.posts[0].featured_image, '/imported/hero.jpg');
@@ -1008,31 +999,31 @@ test('media rewrite preserves exact URL spelling while normalizing only the trai
   const destination = 'HTTPS://CDN.EXAMPLE:443/imported';
   const { previewData, base: resolvedBase } = await convert(
     postItem({ id: 1, slug: 'exact', content: `<img src="${source}/image.jpg">` }),
-    { site: {}, import: { media_from: source, media_to: destination } },
+    { site: {}, import: { media_rewrites: [{ from: source, to: destination  }] } },
   );
 
-  assert.equal(resolvedBase.import.media_from, `${source}/`);
-  assert.equal(resolvedBase.import.media_to, `${destination}/`);
+  assert.equal(resolvedBase.import.media_rewrites[0].from, `${source}/`);
+  assert.equal(resolvedBase.import.media_rewrites[0].to, `${destination}/`);
   assert.equal(previewData.content.posts[0].content, `<p><img src="${destination}/image.jpg"></p>`);
 });
 
 test('media rewrite rejects missing, misspelled, relative, non-HTTP, credentialed, query, and fragment prefixes', async () => {
   const invalidImports = [
-    { media_from: 'https://example.com/media/' },
-    { media_to: 'https://example.com/media/' },
-    { media_form: 'https://example.com/media/', media_to: 'https://cdn.example.com/' },
-    { media_from: '/media/', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https:example.com/media/', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https:/example.com/media/', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://example.com\\media/', media_to: 'https://cdn.example.com/' },
-    { media_from: 'ftp://example.com/media/', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://user:pass@example.com/media/', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://@example.com/media/', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://example.com/media/?v=1', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://example.com/media/?', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://example.com/media/#x', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://example.com/media/#', media_to: 'https://cdn.example.com/' },
-    { media_from: 'https://example.com/media/', media_to: 'https://cdn.example.com/out?q=1' },
+    { media_rewrites: [{ from: 'https://example.com/media/' }] },
+    { media_rewrites: [{ to: 'https://example.com/media/' }] },
+    { media_rewrites: [{ form: 'https://example.com/media/', to: 'https://cdn.example.com/' }] },
+    { media_rewrites: [{ from: '/media/', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https:example.com/media/', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https:/example.com/media/', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://example.com\\media/', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'ftp://example.com/media/', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://user:pass@example.com/media/', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://@example.com/media/', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://example.com/media/?v=1', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://example.com/media/?', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://example.com/media/#x', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://example.com/media/#', to: 'https://cdn.example.com/'  }] },
+    { media_rewrites: [{ from: 'https://example.com/media/', to: 'https://cdn.example.com/out?q=1'  }] },
   ];
 
   for (const importOptions of invalidImports) {
@@ -1543,3 +1534,36 @@ function menuItem({ id, objectType, objectId, title }) {
     <wp:postmeta><wp:meta_key>_menu_item_object_id</wp:meta_key><wp:meta_value>${objectId}</wp:meta_value></wp:postmeta>
   </item>`;
 }
+
+
+test('preserves explicit menu mappings while inferring media and validates output IDs', async () => {
+  const wxr = `<wp:term><wp:term_id>12</wp:term_id><wp:term_slug>main</wp:term_slug><wp:term_name>Renamed</wp:term_name><wp:term_taxonomy>nav_menu</wp:term_taxonomy></wp:term>
+    ${postItem({ id: 1, slug: 'mapped' })}${menuItem({ id: 2, objectType: 'post', objectId: 1, title: 'Read' })}
+    ${attachmentItem(90, 'https://old.example/wp-content/uploads/a.png')}`;
+  const { previewData, base } = await convert(wxr, { site: {}, import: { menu_mapping: { footer: '12' } } });
+  assert.deepEqual(Object.keys(previewData.menus), ['footer']);
+  assert.equal(previewData.menus.footer.items[0].title, 'Read');
+  assert.deepEqual(base.import.menu_mapping, { footer: '12' });
+  assert.deepEqual(base.import.media_rewrites, [{ from: 'https://old.example/wp-content/uploads/', to: 'https://old.example/wp-content/uploads/' }]);
+  for (const mapping of [[], { 'Bad ID': '12' }, { constructor: '12' }, { primary: 12 }, { primary: '0' }]) {
+    await assert.rejects(() => convert(wxr, { site: {}, import: { menu_mapping: mapping } }), /menu_mapping/);
+  }
+});
+
+test('supports an explicit empty media list and resolves multiple target origins', async () => {
+  const source = 'https://old.example/wp-content/uploads/';
+  const wxr = `${attachmentItem(90, source + 'a.png')}${postItem({ id: 1, slug: 'image', postmeta: [['_thumbnail_id', '90']] })}`;
+  const empty = await convert(wxr, { site: {}, import: { media_rewrites: [] } });
+  assert.deepEqual(empty.base.import.media_rewrites, []);
+  assert.equal(empty.previewData.site.media_origin, '');
+  const media_rewrites = [
+    { from: source, to: 'https://media.example/images/' },
+    { from: 'https://older.example/uploads/', to: 'https://other.example/images/' },
+  ];
+  const multiple = await convert(wxr, { site: {}, import: { media_rewrites } });
+  assert.equal(multiple.previewData.site.media_origin, '');
+  assert.equal(multiple.previewData.content.posts[0].featured_image, 'https://media.example/images/a.png');
+  const singleOrigin = await convert(wxr, { site: {}, import: { media_rewrites: media_rewrites.map((rule) => ({ ...rule, to: 'https://media.example/images/' })) } });
+  assert.equal(singleOrigin.previewData.site.media_origin, 'https://media.example');
+  assert.equal(singleOrigin.previewData.content.posts[0].featured_image, '/images/a.png');
+});

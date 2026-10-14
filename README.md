@@ -216,8 +216,10 @@ or default values, pass a base JSON file. A provided base must declare
     "content": ".site-title { letter-spacing: -0.02em; }"
   },
   "import": {
-    "media_from": "https://example.com/wp-content/uploads/",
-    "media_to": "https://media.example.com/imported/"
+    "menu_mapping": { "primary": "12", "footer": "34" },
+    "media_rewrites": [
+      { "from": "https://example.com/wp-content/uploads/", "to": "https://media.example.com/imported/" }
+    ]
   }
 }
 ```
@@ -411,62 +413,70 @@ source. If no safe source candidate is available, `site.comments` is omitted
 and a `comments_api_base_inference_skipped` warning is emitted. Successful
 inference is recorded as `report.inferred.comments_api_base_url`.
 
-### Media URL rewriting
+### Explicit menu selection
 
-`import.media_from` and `import.media_to` must either both be present or both be
-absent. Each value must be an absolute HTTP(S) URL prefix and must not contain:
-
-- username or password credentials;
-- a query string; or
-- a fragment.
-
-Relative URLs and other schemes are rejected. The importer normalizes both
-prefixes to one trailing slash without rewriting their scheme/host spelling
-and records the normalized values in the resolved base.
-
-When the pair is omitted, the importer inspects `wp:attachment_url` values. It
-automatically seeds the resolved base only when every attachment has a safe
-absolute HTTP(S) URL and every URL resolves to the same exact
-`/wp-content/uploads/` prefix:
+`import.menu_mapping` maps ZeroPress menu IDs to the string values of WordPress
+`nav_menu` term IDs (`wp:term_id`). For example:
 
 ```json
 {
   "import": {
-    "media_from": "https://blog.example/wp-content/uploads/",
-    "media_to": "https://blog.example/wp-content/uploads/"
+    "menu_mapping": { "primary": "12", "footer": "34", "utility": "34" }
   }
 }
 ```
 
-The equal pair is an intentional identity state. Runtime prefix rewriting is
-skipped. The preview-data `site.media_origin` is inferred from `media_to`, and
-structured media fields under that origin are compacted to root-relative paths.
-The resolved base retains `site.media_origin: ""` as an automatic-inference
-sentinel so changing `media_to` cannot leave a stale inferred origin behind.
-For example, media transfer remains a separate operation from WXR conversion:
+Only mapped menus are emitted, using exactly those output IDs. An empty object
+selects no menus. A missing source term is an error; a declared but empty menu
+produces no runtime menu. The same WordPress menu can fill more than one slot.
+The mapping uses stable term IDs, so changing a menu's name does not change its
+output ID. Custom IDs must match the theme's menu IDs and use a lowercase letter
+followed by lowercase letters, digits, hyphens or underscores (up to 64 characters).
+`constructor` and `prototype` are reserved. At most 50 mappings are accepted.
 
-```sh
-cd wp-content/
-aws s3 sync uploads s3://your-public-media-bucket/imported
+When `menu_mapping` is omitted, ordinary WXR imports retain automatic menu ID
+assignment, including the first eligible menu as `primary`. Explicit mappings
+never promote another menu to fill an unassigned slot. Only classic `nav_menu`
+menus are supported.
+
+### Media URL rewriting
+
+`import.media_rewrites` is an array of up to 50 `{ "from", "to" } rules. Each
+prefix must be an absolute HTTP(S) URL without credentials, query or fragment.
+Trailing slashes are normalized. The longest matching source prefix wins;
+each match is replaced once without passing the replacement through other rules.
+Identical rules are deduplicated; conflicting destinations for one source are
+rejected. Identity rules can exempt a narrower path from a broader rewrite.
+
+```json
+{
+  "import": {
+    "media_rewrites": [
+      { "from": "https://old.example/wp-content/uploads/", "to": "https://media.example/uploads/" },
+      { "from": "https://older.example/wp-content/uploads/", "to": "https://media.example/uploads/" }
+    ]
+  }
+}
 ```
 
-After the transfer, copy the resolved snapshot to a separate base file if
-needed, change only `media_to` in that file, and run the importer again with
-`--base`. When the normalized values differ, only the exact source prefix is
-replaced. Inline content, excerpts, and SEO metadata keep absolute destination
-URLs. Post/Page `featured_image` and matching `content.media[].src` values are
-root-relative when their final URL is under `site.media_origin`; cross-origin
-media remains absolute. The normalized `import.media_to` is retained in the
-resolved base.
+Inline content, excerpts and SEO metadata retain absolute destination URLs.
+Post/Page `featured_image` and matching `content.media[].src` are root-relative
+when their final origin matches `site.media_origin`; other media stays absolute.
+The normalized rule list is retained in the resolved base.
 
-An explicit non-empty `site.media_origin` is preserved and must be an HTTP(S)
-origin without credentials, path, query, or fragment. A trailing root slash is
-accepted and canonicalized away. When it is empty or omitted, the preview value
-is inferred from the effective `media_to` origin and recorded as
-`report.inferred.media_origin`, while the resolved base keeps the empty auto
-sentinel. The importer does not infer `site.media_delivery_mode` because a
-destination URL alone does not prove that ZeroPress image variants are
-supported.
+An explicit non-empty `site.media_origin` takes precedence. Otherwise a common
+target origin is inferred only when every rule has the same target origin.
+Multiple target origins leave it empty. The resolved base retains the empty
+automatic-inference value so editing rules cannot leave a stale inferred origin.
+Media delivery mode is not inferred from a URL.
+
+An explicit empty list disables rewriting and prefix inference. When the list is
+omitted, every attachment must have a safe URL under the same exact WordPress
+`/wp-content/uploads/` prefix to infer one identity rule (`from` equals `to`).
+Other import settings, including menu mappings, are preserved. Edit `to` in a
+copy of the resolved base to redirect those URLs on the next conversion.
+For missing attachment URLs, a stored relative attachment path can be joined to
+`from` only when there is exactly one source rule.
 
 For WordPress image attachments referenced by Post/Page `_thumbnail_id`, the
 importer reads the top-level original `width` and `height` from
@@ -479,9 +489,9 @@ accepted.
 
 Inference is deliberately all-or-nothing. Mixed origins, custom upload paths,
 missing URLs, malformed URLs, unsafe credentials, or any attachment outside
-the common default WordPress uploads prefix leave `import` unset and produce a
+the common default WordPress uploads prefix leave `import.media_rewrites` unset and produce a
 warning. Content and channel URLs are not used as fallback evidence. Sites with
-no attachments leave `import` unset without a warning.
+no attachments leave `import.media_rewrites` unset without a warning.
 Successful automatic inference is also recorded as
 `report.inferred.media_prefix`; its effective origin is recorded as
 `report.inferred.media_origin`.

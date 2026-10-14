@@ -59,7 +59,7 @@ test('converts published WXR content into valid preview-data', async () => {
   assert.equal(resolvedBase.site.media_origin, '');
   assert.equal(resolvedBase.site.permalinks.output_style, 'html-extension');
   assert.deepEqual(resolvedBase.comments, previewData.site.comments);
-  assert.equal(resolvedBase.import.media_to, 'https://media.example.com/imported/');
+  assert.equal(resolvedBase.import.media_rewrites[0].to, 'https://media.example.com/imported/');
   assert.equal(report.counts.posts, 1);
   assert.equal(report.counts.pages, 2);
   assert.equal(report.counts.media, 1);
@@ -281,10 +281,7 @@ function base() {
       order: 'desc',
       threading: { enabled: true, max_depth: 2 },
     },
-    import: {
-      media_from: 'https://old.example/wp-content/uploads/',
-      media_to: 'https://media.example.com/imported/',
-    },
+    import: { media_rewrites: [{ from: 'https://old.example/wp-content/uploads/', to: 'https://media.example.com/imported/' }] },
   };
 }
 

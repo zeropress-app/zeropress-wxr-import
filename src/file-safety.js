@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const REQUIRED_SOURCE_ROLES = ['input'];
-const OPTIONAL_SOURCE_ROLES = ['base'];
+const OPTIONAL_SOURCE_ROLES = ['base', 'override'];
 const ARTIFACT_ROLES = ['resolvedBaseArtifact', 'reportArtifact'];
 const MAX_TEMP_FILE_ATTEMPTS = 16;
 
@@ -116,8 +116,8 @@ export async function validateFilePlan(plan) {
   for (const role of planRoles) {
     normalized[role] = normalizePath(plan[role], role);
   }
-  if (!sourceRoles.includes('base')) {
-    normalized.base = null;
+  for (const role of OPTIONAL_SOURCE_ROLES) {
+    if (!sourceRoles.includes(role)) normalized[role] = null;
   }
   normalized.artifactDir = hasArtifactBundle
     ? normalizePath(plan.artifactDir, 'artifactDir')

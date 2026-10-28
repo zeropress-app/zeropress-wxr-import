@@ -7,9 +7,9 @@ import {
   createResolvedBase,
   createResolvedWordPressComments,
   inferMediaOriginFromImport,
-  normalizeBase,
   PERMALINK_FIELDS,
 } from './base.js';
+import { normalizeBaseWithOverride } from './override.js';
 import { compareLexically, compareWordPressIdStrings } from './compare.js';
 import { computeImportedPostExcerpt } from './excerpt.js';
 import { buildPreviewMenus, extractNavMenuItem, extractNavMenuTerms } from './menu.js';
@@ -68,7 +68,8 @@ const SEO_DESCRIPTION_META_KEYS = Object.freeze([
   '_genesis_description',
 ]);
 export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
-  const baseData = normalizeBase(base);
+  const report = createReport();
+  const baseData = normalizeBaseWithOverride(base, options.override, report);
   const widgets = createBaseWidgets(baseData.widgets);
   const doc = await parseXml(xmlSource, {
     shouldRetainItemBody: isConvertibleDocumentItem,
@@ -81,7 +82,6 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
     );
   }
   const generatorVersion = options.generatorVersion || '0.0.0';
-  const report = createReport();
 
   const items = doc.items;
   resolveMediaImport({ baseData, items, report });
@@ -514,6 +514,7 @@ function createSite(baseSite, channel, mediaOrigin, timeZone, report) {
 }
 
 function createSiteComments({ baseComments, channel, report }) {
+  if (baseComments?.enabled === false && baseComments.api_base_url === undefined) return undefined;
   let apiBaseUrl;
   if (baseComments === undefined) {
     apiBaseUrl = inferWordPressCommentsApiBaseUrl(channel);

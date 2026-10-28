@@ -17,10 +17,10 @@ const BASE_PREFLIGHT_DEFERRED_ERROR_CODES = new Set([
   'INVALID_COLLECTION_ITEM_REFERENCE',
   'INVALID_FRONT_PAGE_PAGE_REFERENCE',
 ]);
-const BASE_TOP_LEVEL_KEYS = new Set([
+export const BASE_TOP_LEVEL_KEYS = new Set([
   '$schema', 'version', 'site', 'meta', 'newsletter', 'comments', 'widgets', 'collections', 'custom_css', 'custom_html', 'import',
 ]);
-const BASE_SITE_KEYS = new Set([
+export const BASE_SITE_KEYS = new Set([
   'title',
   'description',
   'url',
@@ -154,6 +154,9 @@ export function createResolvedBase({ baseData, site, widgets, configuredMediaOri
   if (resolvedSite.comments !== undefined) {
     resolvedBase.comments = resolvedSite.comments;
     delete resolvedSite.comments;
+  } else if (baseData.comments?.enabled === false) {
+    // Keep the explicit opt-out when no API endpoint is emitted to Preview Data.
+    resolvedBase.comments = structuredClone(baseData.comments);
   }
   resolvedBase.widgets = structuredClone(widgets);
   if (baseData.collections !== undefined) {
@@ -304,8 +307,8 @@ function validateBaseMeta(meta) {
 function validateAndNormalizeBaseComments(comments) {
   if (comments === undefined) return undefined;
   validateClosedRecord(comments, 'comments', ['enabled', 'provider', 'api_base_url', 'per_page', 'order', 'threading']);
-  if (!Object.hasOwn(comments, 'api_base_url')) {
-    throw new Error('Invalid base JSON: comments.api_base_url is required when comments is provided');
+  if (!Object.hasOwn(comments, 'api_base_url') && comments.enabled !== false) {
+    throw new Error('Invalid base JSON: comments.api_base_url is required unless comments.enabled is false');
   }
   validateOptionalBoolean(comments.enabled, 'comments.enabled');
   if (comments.provider !== undefined && comments.provider !== 'wordpress') {
@@ -376,7 +379,7 @@ function validateBasePreviewShape(baseData) {
   if (baseData.newsletter !== undefined) {
     site.newsletter = structuredClone(baseData.newsletter);
   }
-  if (baseData.comments !== undefined) {
+  if (baseData.comments !== undefined && baseData.comments.api_base_url !== undefined) {
     site.comments = createResolvedWordPressComments(
       baseData.comments,
       baseData.comments.api_base_url,

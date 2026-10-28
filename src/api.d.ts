@@ -15,6 +15,6 @@ export const converterVersion: string;
 export function convertWxrToPreviewData(
   source: AsyncIterable<Uint8Array | string>,
   base?: JsonObject,
-  options?: { generatorVersion?: string },
+  options?: { override?: JsonObject; generatorVersion?: string },
 ): Promise<ConversionResult>;
 export function validateBase(base: unknown): JsonObject;

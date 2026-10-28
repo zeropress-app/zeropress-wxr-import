@@ -64,6 +64,11 @@ content. `validateBase(value)` validates and normalizes settings before
 conversion, and `converterVersion` exposes the installed converter version.
 The API performs no uploads, media downloads, or file writes.
 
+Pass partial settings as `options.override` to apply the same
+[override rules](#override-settings) used by the CLI. The original base is still
+validated independently, and neither input object is modified. Ignored keys
+are returned in `report.warnings.ignored_override_properties`.
+
 ### CLI
 
 ```bash
@@ -78,6 +83,7 @@ zeropress-wxr-import --input <file> --output <file.json> [options]
 ### Other Options
 
 - `--base <file>`: Optional v0.7 JSON file containing site preset and import settings
+- `--override <file>`: Optional partial settings applied over the base; unknown keys warn and are ignored
 - `--with-report`: Write the resolved base and import report JSON files
 - `--override-generator-version <version>`: Override only the SemVer label in
   `preview-data.generator`
@@ -159,7 +165,7 @@ without confirmation. The CLI rejects using the resolved artifact directly as
 separate path before editing or reusing it.
 
 Before reading input, the CLI checks canonical paths and existing file
-identities. The output cannot alias the input or an optional base. When the
+identities. The output cannot alias the input, optional base, or optional override. When the
 report bundle is requested, it also cannot alias either helper artifact, and
 symlinked helper directories and unsafe helper targets are rejected.
 
@@ -168,6 +174,59 @@ flushed, and atomically renamed. With `--with-report`, the commit order is
 resolved base, report, and primary output. The primary output is always
 committed last as the success marker, and uncommitted temporary files are
 cleaned after success or failure.
+
+## Override settings
+
+Keep settings that should survive a ZeroPress Static publication in a separate
+`wxr-import-base.override.json`. The plugin replaces the export and base files;
+the override remains yours. Pass it explicitly:
+
+```bash
+zeropress-wxr-import \
+  --input ./wordpress-export.xml \
+  --base ./wxr-import-base.json \
+  --override ./wxr-import-base.override.json \
+  --output ./.zeropress-wxr/zeropress-preview-data.json
+```
+
+```json
+{
+  "site": { "posts_per_page": 8 },
+  "comments": { "enabled": false },
+  "custom_css": { "content": ".site-title { letter-spacing: -0.02em; }" }
+}
+```
+
+There is no separate override schema. `$schema` and `version` are unnecessary;
+if supplied, `$schema` must be a string and is only an editor hint, and `version`
+must match the base. Neither replaces the base's metadata. No schema is fetched.
+The override can also be used without `--base`, starting from the default v0.7 base.
+An omitted option performs no file discovery; an explicitly requested missing,
+unreadable, or invalid JSON file fails the conversion. `{}` makes no changes.
+
+| Setting | Behavior |
+| --- | --- |
+| Omitted property | Retain the base value |
+| Ordinary settings objects, including `site`, `comments`, and `newsletter` | Merge only supplied properties recursively; an empty object makes no changes |
+| `widgets`, `collections`, `import.menu_mapping` | Replace the complete object; `{}` clears it |
+| Arrays, including media rewrite rules and widget items | Replace the complete array; `[]` clears it |
+| `null` | An ordinary value where the contract permits it, never a deletion operator |
+
+Unknown keys in closed settings objects are ignored with a warning containing
+their paths, such as `site.posts_per_page1`. The report records all ignored paths
+under `warnings.ignored_override_properties`; the CLI shows a bounded summary
+on stderr even without `--with-report`. Existing free-form metadata and widget
+settings remain available. A recognized key with an invalid type, value, or
+range is an error; values are never coerced. Replacement objects and array items
+must be complete. For example, a replacement widget area still needs its name
+and items. Generated sections such as `content` are not supported overrides.
+
+The original base must remain valid. The importer merges explicit input values
+before applying defaults, normalization, and WXR inference, then validates the
+effective settings and generated Preview Data. It never writes either input.
+With `--with-report`, the resolved base contains the effective configuration.
+Override values continue to win over later plugin changes until you remove the
+corresponding property from the override file.
 
 ## Base
 
@@ -272,7 +331,8 @@ unknown properties are rejected. `custom_html` uses trusted raw slot strings
 such as `{ "head_end": "<meta ...>", "body_end": "<script ...></script>" }`;
 each slot is limited to 65,536 Unicode code points. Top-level `meta`, `comments`,
 and `newsletter` become `site.meta`, `site.comments`, and `site.newsletter`,
-respectively; their nested `site.*` forms are rejected in the base.
+respectively; their nested `site.*` forms are rejected in the base. Disabled
+comments without an API URL are omitted from Preview Data as described below.
 
 `site.url` is either an empty string or an HTTP(S) origin. Explicit values with
 credentials, a path, query, or fragment are rejected; a trailing root slash is
@@ -375,9 +435,9 @@ rejected.
 explicit `enabled` boolean. When `enabled` is `true`, provide at least one safe
 `signup_url` or `embed_url`.
 
-The WXR bridge always uses the `wordpress` provider. If a `comments` object is
-provided, `api_base_url` is required. Other omitted fields are materialized
-into preview-data and the resolved base with these defaults:
+The WXR bridge always uses the `wordpress` provider. A `comments` object requires
+`api_base_url` unless `enabled` is explicitly `false`. With an API URL, omitted
+fields are materialized into Preview Data and the resolved base with these defaults:
 
 ```json
 {
@@ -393,10 +453,17 @@ into preview-data and the resolved base with these defaults:
 }
 ```
 
-`comments.enabled` defaults to `true` in the WXR base contract. Preview Data
-and the resolved base always contain the effective boolean. Set it to `false`
-to preserve the WordPress provider configuration while disabling the comment
-island.
+`comments.enabled` defaults to `true` in the WXR base contract. With an API URL,
+Preview Data and the resolved base contain the effective boolean. Set it to
+`false` to disable the comment island while preserving an existing endpoint.
+
+For a site that does not use WordPress comments, `{ "comments": { "enabled": false } }`
+is sufficient in the base or override. An API URL is not required when disabled.
+If no URL remains after merging, the importer skips API inference and omits
+`site.comments` from Preview Data. The resolved base preserves the disabled
+settings, so reusing it cannot re-enable comments. A supplied API URL must still
+be valid even when disabled. With comments enabled or `enabled` omitted, an
+explicit comments block requires an API URL.
 
 `comments.api_base_url` is the REST API base, not the comments collection URL;
 themes append `/comments` and request parameters. An explicit value wins. It

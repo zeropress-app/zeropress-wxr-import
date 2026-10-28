@@ -19,6 +19,7 @@ const { version: PACKAGE_VERSION } = require('../package.json');
 const OPTION_IDENTITIES = new Map([
   ['--input', '--input'],
   ['--base', '--base'],
+  ['--override', '--override'],
   ['--output', '--output'],
   ['--with-report', '--with-report'],
   ['--override-generator-version', '--override-generator-version'],
@@ -52,6 +53,7 @@ export async function run(argv) {
   const filePlan = {
     input: args.input,
     base: args.base,
+    override: args.override,
     output: args.output,
   };
   if (args.withReport) {
@@ -64,14 +66,16 @@ export async function run(argv) {
   await validateFilePlan(filePlan);
 
   const base = args.base
-    ? await readBaseJsonFile(args.base)
+    ? await readSettingsJsonFile(args.base, 'base')
     : { version: '0.7' };
+  const override = args.override ? await readSettingsJsonFile(args.override, 'override') : undefined;
   const generatorVersion = args.generatorVersionOverride ?? PACKAGE_VERSION;
   const inputStream = createReadStream(args.input);
   let conversion;
   try {
     conversion = await convertWxrToPreviewData(inputStream, base, {
       generatorVersion,
+      override,
     });
   } catch (error) {
     inputStream.destroy();
@@ -112,6 +116,7 @@ export function parseArgs(argv) {
     if (
       arg === '--input'
       || arg === '--base'
+      || arg === '--override'
       || arg === '--output'
       || arg === '--override-generator-version'
     ) {
@@ -158,6 +163,7 @@ export function parseArgs(argv) {
   return {
     input: path.resolve(process.cwd(), flags.input),
     base: flags.base ? path.resolve(process.cwd(), flags.base) : null,
+    override: flags.override ? path.resolve(process.cwd(), flags.override) : null,
     output: path.resolve(process.cwd(), flags.output),
     artifactDir,
     resolvedBaseArtifact: artifactDir
@@ -198,6 +204,7 @@ Required Options:
 
 Options:
   --base <file>                       Optional v0.7 JSON file containing site preset and import settings
+  --override <file>                   Optional partial settings applied over the base; unknown keys warn and are ignored
   --with-report                       Write the resolved base and import report JSON files
   --override-generator-version <ver>  Override only the SemVer label in preview-data.generator
   --help, -h                          Show help
@@ -206,28 +213,28 @@ Options:
 Notes:
   - only published WordPress posts and pages are exported
   - WXR comment records are discarded; WordPress API runtime settings may be generated
-  - site/theme-specific settings should be provided in the base file`);
+  - site/theme-specific settings should be provided in the base or override file`);
 }
 
-async function readBaseJsonFile(filePath) {
+async function readSettingsJsonFile(filePath, kind) {
   let raw;
   try {
     raw = await fs.readFile(filePath, 'utf8');
   } catch (error) {
     if (error?.code === 'ENOENT') {
-      throw new Error(`base file not found: ${filePath}`);
+      throw new Error(`${kind} file not found: ${filePath}`);
     }
     if (error?.code === 'EISDIR') {
-      throw new Error(`base path is not a file: ${filePath}`);
+      throw new Error(`${kind} path is not a file: ${filePath}`);
     }
-    throw new Error(`Failed to read base file: ${filePath}`);
+    throw new Error(`Failed to read ${kind} file: ${filePath}`);
   }
 
   try {
     return JSON.parse(raw);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid base JSON: ${message}`);
+    throw new Error(`Invalid ${kind} JSON: ${message}`);
   }
 }
 
@@ -278,7 +285,9 @@ function printWarnings(report) {
     const affectedSummary = affected.length > 0
       ? `; affected: ${affected.slice(0, 10).join(', ')}${affected.length > 10 ? `, … (+${affected.length - 10})` : ''}`
       : '';
-    const unit = code === 'timezone_inference_ambiguous'
+    const unit = code === 'ignored_override_properties'
+      ? 'unknown property/properties ignored'
+      : code === 'timezone_inference_ambiguous'
       ? 'offset(s)'
       : code === 'timezone_inference_skipped' || code === 'locale_inference_skipped'
         ? 'setting(s)'

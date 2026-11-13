@@ -1,3 +1,4 @@
+import { openLocalWxrBundle } from './wxr-bundle-node.js';
 import { createDiskWorkStore, readBoundedJson, stagePreviewDataChunks } from '@zeropress/preview-data-validator/node';
 import { jsonFragments } from '@zeropress/preview-data-validator/chunks';
 import { createReadStream } from 'node:fs';
@@ -5,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
-import { convertWxrToPreviewData, convertWxrToPreviewDataSource } from './converter.js';
+import { convertWxrToPreviewData, convertWxrToPreviewDataSource, convertWxrBundleToPreviewDataSource } from './converter.js';
 import { createColor } from './color.js';
 import { toTerminalSafeText } from './terminal.js';
 import {
@@ -21,6 +22,7 @@ const require = createRequire(import.meta.url);
 const { version: PACKAGE_VERSION } = require('../package.json');
 const OPTION_IDENTITIES = new Map([
   ['--input', '--input'],
+  ['--input-format', '--input-format'],
   ['--base', '--base'],
   ['--override', '--override'],
   ['--output', '--output'],
@@ -70,23 +72,26 @@ export async function run(argv) {
   await validateFilePlan(filePlan);
   if (args.outputFormat === 'chunks') await assertChunkPartsSafe(filePlan);
 
-  const base = args.base
-    ? await readSettingsJsonFile(args.base, 'base', args.outputFormat === 'chunks')
-    : { version: '0.7' };
-  const override = args.override ? await readSettingsJsonFile(args.override, 'override', args.outputFormat === 'chunks') : undefined;
-  const generatorVersion = args.generatorVersionOverride ?? PACKAGE_VERSION;
-  const inputStream = createReadStream(args.input);
-  let conversion;
-  let workStore;
+  let conversion, workStore, bundle, inputStream;
   try {
-    if (args.outputFormat === 'chunks') workStore = await createDiskWorkStore();
-    const convert = workStore ? convertWxrToPreviewDataSource : convertWxrToPreviewData;
-    conversion = await convert(inputStream, base, { generatorVersion, override, workStore });
-    await writeArtifactsAtomically({ args, ...conversion, resolvedBase: conversion.base });
+    if (args.inputFormat === 'bundle') bundle = await openLocalWxrBundle(filePlan, { chunks: args.outputFormat === 'chunks' });
+    const base = !bundle && args.base
+      ? await readSettingsJsonFile(args.base, 'base', args.outputFormat === 'chunks') : { version: '0.7' };
+    const override = args.override ? await readSettingsJsonFile(args.override, 'override', !!bundle || args.outputFormat === 'chunks') : undefined;
+    const generatorVersion = args.generatorVersionOverride ?? PACKAGE_VERSION;
+    if (bundle || args.outputFormat === 'chunks') workStore = await createDiskWorkStore();
+    if (bundle) conversion = await convertWxrBundleToPreviewDataSource(bundle, { generatorVersion, override, workStore });
+    else {
+      inputStream = createReadStream(args.input);
+      const convert = workStore ? convertWxrToPreviewDataSource : convertWxrToPreviewData;
+      conversion = await convert(inputStream, base, { generatorVersion, override, workStore });
+    }
+    await writeArtifactsAtomically({ args, ...conversion, resolvedBase: conversion.base, beforeCommit: () => bundle?.assertCurrent() });
   } finally {
-    inputStream.destroy();
+    inputStream?.destroy();
     await conversion?.source?.close();
     await workStore?.close();
+    await bundle?.close();
   }
   const { report } = conversion;
   const outputFileSizeBytes = (await fs.stat(args.output)).size;
@@ -120,6 +125,7 @@ export function parseArgs(argv) {
     }
     if (
       arg === '--input'
+      || arg === '--input-format'
       || arg === '--base'
       || arg === '--override'
       || arg === '--output'
@@ -161,6 +167,8 @@ export function parseArgs(argv) {
     );
   }
 
+  const inputFormat = flags['input-format'] ?? 'xml';
+  if (!['xml', 'bundle'].includes(inputFormat)) throw new Error('Invalid arguments: --input-format must be xml or bundle');
   const outputFormat = flags['output-format'] ?? 'json';
   if (!['json', 'chunks'].includes(outputFormat)) throw new Error('Invalid arguments: --output-format must be json or chunks');
   const withReport = flags.withReport === true;
@@ -182,6 +190,7 @@ export function parseArgs(argv) {
       : null,
     withReport,
     outputFormat,
+    inputFormat,
     generatorVersionOverride: flags.generatorVersionOverride ?? null,
   };
 }
@@ -212,6 +221,7 @@ Required Options:
   --output <file.json>  Output preview-data v0.7 JSON file
 
 Options:
+  --input-format <xml|bundle>         Input format (default: xml); bundle takes wordpress-export.manifest.json
   --output-format <json|chunks>       Output format (default: json); chunks writes a manifest and immutable parts
   --base <file>                       Optional v0.7 JSON file containing site preset and import settings
   --override <file>                   Optional partial settings applied over the base; unknown keys warn and are ignored
@@ -252,10 +262,10 @@ async function readSettingsJsonFile(filePath, kind, bounded = false) {
   }
 }
 
-async function writeArtifactsAtomically({ args, previewData, source, report, resolvedBase }) {
+async function writeArtifactsAtomically({ args, previewData, source, report, resolvedBase, beforeCommit }) {
   const stages = [];
   try {
-    const stagedChunks = source ? await stagePreviewDataChunks(source, args.output) : null;
+    const stagedChunks = source && args.outputFormat === 'chunks' ? await stagePreviewDataChunks(source, args.output) : null;
     if (args.withReport) {
       await ensureSafeDirectory(args.artifactDir);
       stages.push(await stageJsonFile(args.resolvedBaseArtifact, resolvedBase));
@@ -263,8 +273,9 @@ async function writeArtifactsAtomically({ args, previewData, source, report, res
     }
     stages.push(stagedChunks
       ? await stageAtomicFile(args.output, stagedChunks.text, { encoding: 'utf8' })
-      : await stageJsonFile(args.output, previewData));
+      : source ? await stageAtomicFile(args.output, streamSourceJson(source), { encoding: 'utf8' }) : await stageJsonFile(args.output, previewData));
 
+    await beforeCommit?.();
     await commitStagedFiles(stages);
   } catch (error) {
     try {
@@ -394,4 +405,25 @@ function printSummary({
 
 function nonNegativeCount(value) {
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+async function* streamSourceJson(source) {
+  yield '{\n';
+  for (const [key, value] of Object.entries(source.header)) {
+    yield `  ${JSON.stringify(key)}: `;
+    yield* jsonFragments(value, 1);
+    yield ',\n';
+  }
+  yield '  "content": {\n';
+  for (const [i, collection] of source.collections.entries()) {
+    if (i) yield ',\n';
+    yield `    ${JSON.stringify(collection)}: [`;
+    let index = 0;
+    for await (const entry of source.records(collection)) {
+      yield index++ ? ',\n      ' : '\n      ';
+      yield* jsonFragments(entry.value, 3);
+    }
+    yield index ? '\n    ]' : ']';
+  }
+  yield '\n  }\n}\n';
 }

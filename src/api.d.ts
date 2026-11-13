@@ -29,3 +29,9 @@ export function convertWxrToPreviewDataSource(
     workStore: import('@zeropress/preview-data-validator').PreviewDataWorkStore;
   },
 ): Promise<{ source: import('@zeropress/preview-data-validator').PreviewDataSource; base: JsonObject; report: ConversionReport }>;
+
+/** Explicit allowlisted byte resolver; no implicit network or filesystem access. */
+export function convertWxrBundleToPreviewDataSource(
+  bundle: { manifest: unknown; openFile(path: string): AsyncIterable<Uint8Array> | Promise<AsyncIterable<Uint8Array>> },
+  options: { override?: JsonObject; generatorVersion?: string; workStore: import('@zeropress/preview-data-validator').PreviewDataWorkStore },
+): ReturnType<typeof convertWxrToPreviewDataSource>;

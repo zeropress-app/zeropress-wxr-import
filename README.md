@@ -77,11 +77,12 @@ zeropress-wxr-import --input <file> --output <file.json> [options]
 
 ### Required Options
 
-- `--input <file>`: WordPress WXR XML export file
+- `--input <file>`: WordPress WXR XML, or a manifest with `--input-format bundle`
 - `--output <file.json>`: Output preview-data v0.7 JSON file
 
 ### Other Options
 
+- `--input-format xml|bundle`: XML by default, or a verified split WXR manifest
 - `--base <file>`: Optional v0.7 JSON file containing site preset and import settings
 - `--override <file>`: Optional partial settings applied over the base; unknown keys warn and are ignored
 - `--output-format json|chunks`: Single-file JSON by default, or a manifest with bounded JSON chunks
@@ -753,6 +754,68 @@ failures, and write failures exit with status 1.
 
 Values WXR cannot reliably provide—such as theme-specific metadata, newsletter
 settings, and custom category/tag permalink policy—belong in the base file.
+
+## Split WXR input
+
+Use `--input-format bundle` to read a ZeroPress Static split export. XML remains
+the default input format; existing CLI invocations and object APIs keep their
+single-WXR behavior. Input splitting and Preview Data chunk output are separate
+options:
+
+```sh
+zeropress-wxr-import --input-format bundle \
+  --input wordpress-export.manifest.json \
+  --override wxr-import-base.override.json \
+  --output-format chunks \
+  --output .zeropress-wxr/zeropress-preview-data.manifest.json
+```
+
+Keep `wordpress-export.manifest.json`, its `wordpress-export.parts/p-<sha256>.xml`
+files, and `wxr-import-base.json` together. The manifest binds the exact base
+bytes. `--base` can be omitted in bundle mode; if supplied, it must name that
+bound base file. Persistent customization belongs in the separate override.
+
+The version-1 manifest uses `format: "zeropress-wxr-bundle"`, `format_version: 1`,
+`wxr_version: "1.2"`, `generated_at`, `data_hash`, a base descriptor, and ordered
+part descriptors. Each descriptor contains `path`, `bytes`, and `sha256`; parts
+also count `authors`, `categories`, `tags`, `terms`, and `items`. Each part is a
+complete WXR document with matching channel fields and complete records. Channel
+metadata is distributed across the inventory, not duplicated in every part.
+The manifest supplies generation time; parts must not supply their own date.
+
+The importer validates the closed manifest format, fixed relative paths, byte
+sizes, SHA-256 digests, record counts, consistent channel metadata, and unique
+record identities. It rejects missing/corrupt files, unsupported versions,
+symlink parts directories/files, and output/report aliases of any listed input.
+The Node CLI snapshots verified inputs to private temporary storage and checks
+that they are still current before replacing output. Unlisted files are never
+read. No URL or `$schema` is fetched. Digests detect inconsistency; they are not
+signatures or proof of who produced the export. `data_hash` is validated as a
+logical identifier; the importer does not reconstruct the producer's digest.
+
+WXR bundle bounds are **1 MiB per manifest, 8 MiB per XML part or bound base, and
+256 parts**. These are separate from the Preview Data output bounds below.
+An oversized individual record cannot be divided across XML parts. Invalid
+input fails the complete conversion and preserves the previous output.
+
+Parts are read sequentially into bounded buffers. Parsed item bodies go into
+the same work store used by chunk output; authors, taxonomies, menu/page trees,
+media references, permalink and timezone inference are resolved for the whole
+logical export, once. No independent per-part conversion or merge of inferred
+sites occurs. Metadata, warnings and indexes still grow with content count;
+this is not constant-memory processing. Temporary disk capacity is required.
+
+`--output-format json` remains supported with bundle input and streams its
+output, but downstream readers of a single large JSON file retain their own
+limits. Prefer chunk output with a compatible builder for large exports.
+
+The filesystem-independent API is
+`convertWxrBundleToPreviewDataSource({manifest, openFile}, {override, generatorVersion, workStore})`.
+`openFile(relativePath)` supplies an async iterable of UTF-8 **bytes** for the
+allowlisted base or part path; it may return a promise of that iterable. Node
+and browser hosts use the same validation/conversion code. The caller owns and
+closes both the work store and returned source, as with
+`convertWxrToPreviewDataSource()`. Existing object API signatures are unchanged.
 
 ## Chunk output for larger exports
 

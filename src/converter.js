@@ -1,3 +1,4 @@
+import { openBundleInput } from './wxr-bundle.js';
 import { assertValidation } from '@zeropress/preview-data-validator/chunks';
 import {
   canonicalizePreviewDataKeyOrder,
@@ -82,11 +83,17 @@ export async function convertWxrToPreviewDataSource(xmlSource, base, options = {
   return convertInternal(xmlSource, base, options, options.workStore);
 }
 
-async function convertInternal(xmlSource, base, options, workStore) {
+export async function convertWxrBundleToPreviewDataSource(bundle, options = {}) {
+  if (!options.workStore?.put || !options.workStore?.get) throw new Error('Bundle conversion requires a workStore with put/get');
+  const input = await openBundleInput(bundle);
+  return convertInternal(null, input.base, options, options.workStore, input.parse);
+}
+
+async function convertInternal(xmlSource, base, options, workStore, parse = parseXml) {
   const report = createReport();
   const baseData = normalizeBaseWithOverride(base, options.override, report);
   const widgets = createBaseWidgets(baseData.widgets);
-  const doc = await parseXml(xmlSource, {
+  const doc = await parse(xmlSource, {
     shouldRetainItemBody: isConvertibleDocumentItem,
     ...(workStore ? {
       maxRetainedTextBytes: 64 * 1024 * 1024,

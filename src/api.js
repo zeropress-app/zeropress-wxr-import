@@ -1,5 +1,5 @@
 import metadata from '../package.json' with { type: 'json' };
-import { convertWxrToPreviewData as convert, convertWxrToPreviewDataSource as convertSource } from './converter.js';
+import { convertWxrToPreviewData as convert, convertWxrToPreviewDataSource as convertSource, convertWxrBundleToPreviewDataSource as convertBundle } from './converter.js';
 
 export const converterVersion = metadata.version;
 
@@ -19,4 +19,9 @@ export { normalizeBase as validateBase } from './base.js';
 /** Replayable conversion; the caller owns the supplied temporary work store. */
 export function convertWxrToPreviewDataSource(source, base = { version: '0.7' }, options = {}) {
   return convertSource(source, base, { ...options, generatorVersion: options.generatorVersion ?? converterVersion });
+}
+
+/** Convert one verified WXR bundle as one logical export. */
+export function convertWxrBundleToPreviewDataSource(bundle, options = {}) {
+  return convertBundle(bundle, { ...options, generatorVersion: options.generatorVersion ?? converterVersion });
 }

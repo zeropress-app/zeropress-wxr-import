@@ -34,6 +34,23 @@ async function materialize(source) {
   for (const name of source.collections) { data.content[name] = []; for await (const { value } of source.records(name)) data.content[name].push(value); }
   return data;
 }
+test('verified split transport applies optional body policy after validating the bundle', async t => {
+  const data = fixture(), store = await createDiskWorkStore(); t.after(() => store.close());
+  const old = data.manifest.parts[1];
+  const text = data.files[old.path].toString().replace(/<content:encoded>[\s\S]*?<\/content:encoded>/, '<content:encoded><![CDATA[' + '<p>' + 'x'.repeat(4194304 - 7) + '</p>' + ']]></content:encoded>');
+  const value = Buffer.from(text), hash = sha(value), name = `wordpress-export.parts/p-${hash}.xml`;
+  delete data.files[old.path]; data.files[name] = value;
+  data.manifest.parts[1] = { ...old, path: name, bytes: value.length, sha256: hash };
+  await assert.rejects(() => convertWxrBundleToPreviewDataSource(data, { workStore: store, maxBodyBytes: 1048576 }), { code: 'CONTENT_BODY_TOO_LARGE' });
+  for (const maxBodyBytes of [undefined, null, 4194304]) {
+    const result = await convertWxrBundleToPreviewDataSource(data, { workStore: store, maxBodyBytes });
+    try {
+      const post = (await materialize(result.source)).content.posts[0];
+      assert.equal(Buffer.byteLength(post.content), 4194304);
+      assert.equal(result.report.warnings.large_content_bodies.max_body_bytes, 4194304);
+    } finally { await result.source.close(); }
+  }
+});
 async function setup(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wxr-bundle-test-'));
   const store = await createDiskWorkStore();

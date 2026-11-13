@@ -1,4 +1,5 @@
 import sax from 'sax';
+import { BodyByteCounter, BODY_WARNING_BYTES, assertBodyBytes } from '@zeropress/preview-data-validator/content-policy';
 import { createUtf8Sanitizer } from './utf8.js';
 import { parseWordPressAttachmentMetadata } from './wordpress-attachment-metadata.js';
 
@@ -112,10 +113,17 @@ export async function parseXml(source, options = {}) {
     }
 
     frame.collectText = shouldCollectText(frame, parent);
+    if (parent?.role === 'item' && frame.uri === CONTENT_NAMESPACE && frame.local === 'encoded') frame.bodyCounter = new BodyByteCounter(options.bodyPolicy);
     stack.push(frame);
   };
   const receiveText = (text) => {
     const frame = stack.at(-1);
+    if (frame?.bodyCounter) {
+      const normalized = normalizeXmlLineEndings(frame.bodyCR && text.startsWith('\n') ? text.slice(1) : text);
+      if (text.length) frame.bodyCR = text.endsWith('\r');
+      frame.bodyCounter.write(normalized);
+      if (frame.bodyCounter.exceeded) { frame.text = null; return; }
+    }
     if (textLimit !== Infinity && frame?.collectText) {
       const bytes = encoder.encode(text).length;
       frame.textBytes = (frame.textBytes || 0) + bytes;
@@ -132,6 +140,11 @@ export async function parseXml(source, options = {}) {
       throw new Error('Invalid WXR XML: unexpected closing tag');
     }
     const parent = stack.at(-1) ?? null;
+    if (frame.bodyCounter) {
+      const bytes = frame.bodyCounter.finish();
+      if (bytes >= BODY_WARNING_BYTES || frame.bodyCounter.exceeded) parent.record.bodyBytes = Math.max(parent.record.bodyBytes || 0, bytes);
+      if (frame.bodyCounter.exceeded) frame.text = null;
+    }
     const rawText = frame.text ? normalizeXmlLineEndings(frame.text.join('')) : '';
     const value = rawText.trim();
 
@@ -141,6 +154,7 @@ export async function parseXml(source, options = {}) {
       parent,
       value,
       shouldRetainItemBody,
+      bodyPolicy: options.bodyPolicy,
     });
     if (frame.role === 'item') { insideItem = false; itemBytes = 0; }
   };
@@ -150,13 +164,12 @@ export async function parseXml(source, options = {}) {
   let inputMode = null;
   let drainedItems = 0;
   async function writeAndDrain(text) {
-    if (!onItem) { writeParserChunk(parser, text); return; }
     for (let offset = 0; offset < text.length;) {
       let end = Math.min(offset + 32768, text.length);
       const last = text.charCodeAt(end - 1), next = text.charCodeAt(end);
       if (end < text.length && last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
       writeParserChunk(parser, text.slice(offset, end));
-      while (drainedItems < document.items.length) {
+      while (onItem && drainedItems < document.items.length) {
         document.items[drainedItems] = await onItem(document.items[drainedItems], drainedItems);
         drainedItems++;
       }
@@ -188,6 +201,7 @@ export async function parseXml(source, options = {}) {
     await writeAndDrain(inputSanitizer.end());
     parser.close();
   } catch (error) {
+    if (error?.code === 'CONTENT_BODY_TOO_LARGE') throw error;
     if (error instanceof Error && error.message.startsWith('Invalid WXR')) {
       throw error;
     }
@@ -326,6 +340,7 @@ function captureClosedFrame({
   parent,
   value,
   shouldRetainItemBody,
+  bodyPolicy,
 }) {
   if (!parent) return;
 
@@ -339,6 +354,9 @@ function captureClosedFrame({
       if (shouldRetainItemBody && !shouldRetainItemBody(frame.record)) {
         frame.record.content = '';
         frame.record.excerpt = '';
+        delete frame.record.bodyBytes;
+      } else {
+        assertBodyBytes(frame.record.bodyBytes || 0, `${wpText(frame.record, 'post_type')}:${wpText(frame.record, 'post_id')}`, 'WXR body', bodyPolicy);
       }
       document.items.push(frame.record);
     }

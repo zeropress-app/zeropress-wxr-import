@@ -1,4 +1,5 @@
 import { normalizeHttpUrlPrefix, parseSafeHttpUrl } from './url.js';
+import { BodyByteCounter, assertBodyBytes } from '@zeropress/preview-data-validator/content-policy';
 
 const WORDPRESS_UPLOADS_MARKER = '/wp-content/uploads/';
 
@@ -66,10 +67,15 @@ export function inferWordPressMediaPrefixFromAttachmentUrl(value) {
 }
 
 /** Replace original text matches once, without feeding destinations into later rules. */
-export function rewriteMediaUrls(value, rules) {
+export function rewriteMediaUrls(value, rules, bodyId, bodyPolicy) {
   const text = String(value ?? '');
   if (!rules.length) return text;
   const parts = [];
+  const counter = bodyId === undefined ? null : new BodyByteCounter(bodyPolicy);
+  const append = (part) => {
+    if (counter) assertBodyBytes(counter.write(part), bodyId, 'converted content', bodyPolicy);
+    parts.push(part);
+  };
   // Cache the next match per rule so absent or later prefixes are not rescanned
   // for every URL in a large export. Rules are ordered longest first.
   const next = rules.map((rule) => text.indexOf(rule.from));
@@ -83,10 +89,12 @@ export function rewriteMediaUrls(value, rules) {
       if (next[index] >= 0 && (selected < 0 || next[index] < next[selected])) selected = index;
     }
     if (selected < 0) break;
-    parts.push(text.slice(cursor, next[selected]), rules[selected].to);
+    append(text.slice(cursor, next[selected]));
+    append(rules[selected].to);
     cursor = next[selected] + rules[selected].from.length;
   }
-  parts.push(text.slice(cursor));
+  append(text.slice(cursor));
+  if (counter) assertBodyBytes(counter.finish(), bodyId, 'converted content', bodyPolicy);
   return parts.join('');
 }
 

@@ -1,3 +1,17 @@
+import { createBodyWarningCollector } from '@zeropress/preview-data-validator/content-policy';
+
+const bodyWarnings = new WeakMap();
+export function addBodyWarning(report, id, bytes) {
+  let collector = bodyWarnings.get(report);
+  if (!collector) { collector = createBodyWarningCollector(); bodyWarnings.set(report, collector); }
+  collector.add(id, bytes);
+  const [warning] = collector.warnings();
+  if (warning) report.warnings.large_content_bodies = {
+    count: warning.count, affected: warning.affected, max_body_bytes: warning.maxBodyBytes,
+    omitted_examples: warning.omittedExamples, message: warning.message,
+  };
+}
+
 const WARNING_CODES = Object.freeze([
   'skipped_menu_items',
   'synthesized_authors',

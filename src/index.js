@@ -1,3 +1,4 @@
+import { normalizeBodyPolicy } from '@zeropress/preview-data-validator/content-policy';
 import { openLocalWxrBundle } from './wxr-bundle-node.js';
 import { createDiskWorkStore, readBoundedJson, stagePreviewDataChunks } from '@zeropress/preview-data-validator/node';
 import { jsonFragments } from '@zeropress/preview-data-validator/chunks';
@@ -25,6 +26,7 @@ const OPTION_IDENTITIES = new Map([
   ['--input-format', '--input-format'],
   ['--base', '--base'],
   ['--override', '--override'],
+  ['--max-body-bytes', '--max-body-bytes'],
   ['--output', '--output'],
   ['--output-format', '--output-format'],
   ['--with-report', '--with-report'],
@@ -80,11 +82,11 @@ export async function run(argv) {
     const override = args.override ? await readSettingsJsonFile(args.override, 'override', !!bundle || args.outputFormat === 'chunks') : undefined;
     const generatorVersion = args.generatorVersionOverride ?? PACKAGE_VERSION;
     if (bundle || args.outputFormat === 'chunks') workStore = await createDiskWorkStore();
-    if (bundle) conversion = await convertWxrBundleToPreviewDataSource(bundle, { generatorVersion, override, workStore });
+    if (bundle) conversion = await convertWxrBundleToPreviewDataSource(bundle, { generatorVersion, override, workStore, maxBodyBytes: args.maxBodyBytes });
     else {
       inputStream = createReadStream(args.input);
       const convert = workStore ? convertWxrToPreviewDataSource : convertWxrToPreviewData;
-      conversion = await convert(inputStream, base, { generatorVersion, override, workStore });
+      conversion = await convert(inputStream, base, { generatorVersion, override, workStore, maxBodyBytes: args.maxBodyBytes });
     }
     await writeArtifactsAtomically({ args, ...conversion, resolvedBase: conversion.base, beforeCommit: () => bundle?.assertCurrent() });
   } finally {
@@ -128,6 +130,7 @@ export function parseArgs(argv) {
       || arg === '--input-format'
       || arg === '--base'
       || arg === '--override'
+      || arg === '--max-body-bytes'
       || arg === '--output'
       || arg === '--output-format'
       || arg === '--override-generator-version'
@@ -167,6 +170,9 @@ export function parseArgs(argv) {
     );
   }
 
+  const rawMaximum = flags['max-body-bytes'];
+  if (rawMaximum !== undefined && !/^[0-9]+$/.test(rawMaximum)) throw new Error('Invalid arguments: --max-body-bytes requires positive integer bytes');
+  const { maxBodyBytes } = normalizeBodyPolicy({ maxBodyBytes: rawMaximum === undefined ? null : Number(rawMaximum) });
   const inputFormat = flags['input-format'] ?? 'xml';
   if (!['xml', 'bundle'].includes(inputFormat)) throw new Error('Invalid arguments: --input-format must be xml or bundle');
   const outputFormat = flags['output-format'] ?? 'json';
@@ -192,6 +198,7 @@ export function parseArgs(argv) {
     outputFormat,
     inputFormat,
     generatorVersionOverride: flags.generatorVersionOverride ?? null,
+    maxBodyBytes,
   };
 }
 
@@ -225,12 +232,14 @@ Options:
   --output-format <json|chunks>       Output format (default: json); chunks writes a manifest and immutable parts
   --base <file>                       Optional v0.7 JSON file containing site preset and import settings
   --override <file>                   Optional partial settings applied over the base; unknown keys warn and are ignored
+  --max-body-bytes <bytes>             Optional inclusive UTF-8 body maximum; omitted means no body-policy ceiling
   --with-report                       Write the resolved base and import report JSON files
   --override-generator-version <ver>  Override only the SemVer label in preview-data.generator
   --help, -h                          Show help
   --version, -v                       Show version
 
 Notes:
+  - bodies of 256 KiB or more warn; format and resource protections always apply
   - only published WordPress posts and pages are exported
   - WXR comment records are discarded; WordPress API runtime settings may be generated
   - site/theme-specific settings should be provided in the base or override file`);
@@ -342,7 +351,8 @@ function printWarnings(report) {
       : code === 'timezone_inference_skipped' || code === 'locale_inference_skipped'
         ? 'setting(s)'
         : 'item(s)';
-    console.error(color.yellow(`WARN ${code}: ${count} ${unit}${affectedSummary}`));
+    const guidance = code === 'large_content_bodies' ? `; ${details.message}; ${Math.max(0, count - Math.min(10, affected.length))} additional example(s) not shown` : '';
+    console.error(color.yellow(`WARN ${code}: ${count} ${unit}${affectedSummary}${guidance}`));
   }
 }
 

@@ -3,7 +3,7 @@ export interface JsonObject { [key: string]: JsonValue; }
 export interface ConversionReport {
   counts: Record<string, number>;
   skipped: Record<string, number>;
-  warnings: Record<string, { count: number; affected: string[] }>;
+  warnings: Record<string, { count: number; affected: string[]; max_body_bytes?: number; omitted_examples?: number; message?: string }>;
   inferred: JsonObject;
 }
 export interface ConversionResult {
@@ -15,7 +15,7 @@ export const converterVersion: string;
 export function convertWxrToPreviewData(
   source: AsyncIterable<Uint8Array | string>,
   base?: JsonObject,
-  options?: { override?: JsonObject; generatorVersion?: string },
+  options?: { override?: JsonObject; maxBodyBytes?: number | null; generatorVersion?: string },
 ): Promise<ConversionResult>;
 export function validateBase(base: unknown): JsonObject;
 
@@ -25,7 +25,7 @@ export function convertWxrToPreviewDataSource(
   base: JsonObject | undefined,
   options: {
     override?: JsonObject;
-    generatorVersion?: string;
+    maxBodyBytes?: number | null; generatorVersion?: string;
     workStore: import('@zeropress/preview-data-validator').PreviewDataWorkStore;
   },
 ): Promise<{ source: import('@zeropress/preview-data-validator').PreviewDataSource; base: JsonObject; report: ConversionReport }>;
@@ -33,5 +33,5 @@ export function convertWxrToPreviewDataSource(
 /** Explicit allowlisted byte resolver; no implicit network or filesystem access. */
 export function convertWxrBundleToPreviewDataSource(
   bundle: { manifest: unknown; openFile(path: string): AsyncIterable<Uint8Array> | Promise<AsyncIterable<Uint8Array>> },
-  options: { override?: JsonObject; generatorVersion?: string; workStore: import('@zeropress/preview-data-validator').PreviewDataWorkStore },
+  options: { override?: JsonObject; maxBodyBytes?: number | null; generatorVersion?: string; workStore: import('@zeropress/preview-data-validator').PreviewDataWorkStore },
 ): ReturnType<typeof convertWxrToPreviewDataSource>;

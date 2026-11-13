@@ -29,7 +29,8 @@ import {
   resolveUniqueSlug,
   slugFromText,
 } from './slug.js';
-import { addWarning, createReport } from './report.js';
+import { addWarning, addBodyWarning, createReport } from './report.js';
+import { checkBodySize, normalizeBodyPolicy } from '@zeropress/preview-data-validator/content-policy';
 import {
   hasQueryOrFragment,
   parseSafeHttpUrl,
@@ -85,15 +86,18 @@ export async function convertWxrToPreviewDataSource(xmlSource, base, options = {
 
 export async function convertWxrBundleToPreviewDataSource(bundle, options = {}) {
   if (!options.workStore?.put || !options.workStore?.get) throw new Error('Bundle conversion requires a workStore with put/get');
+  options = { ...options, ...normalizeBodyPolicy(options) };
   const input = await openBundleInput(bundle);
   return convertInternal(null, input.base, options, options.workStore, input.parse);
 }
 
 async function convertInternal(xmlSource, base, options, workStore, parse = parseXml) {
+  const bodyPolicy = normalizeBodyPolicy(options);
   const report = createReport();
   const baseData = normalizeBaseWithOverride(base, options.override, report);
   const widgets = createBaseWidgets(baseData.widgets);
   const doc = await parse(xmlSource, {
+    bodyPolicy,
     shouldRetainItemBody: isConvertibleDocumentItem,
     ...(workStore ? {
       maxRetainedTextBytes: 64 * 1024 * 1024,
@@ -263,6 +267,7 @@ async function convertInternal(xmlSource, base, options, workStore, parse = pars
 
     if (postType === 'post') {
       const post = convertPost({
+        bodyPolicy,
         item,
         publicId,
         publishedAt,
@@ -288,6 +293,7 @@ async function convertInternal(xmlSource, base, options, workStore, parse = pars
     }
 
     const pageRecord = convertPage({
+      bodyPolicy,
       item,
       publicId,
       updatedAt,
@@ -1144,16 +1150,18 @@ function formatTaxonomyTermSource({
 /**
  * Derive the fields Posts and Pages compute identically from a WXR item.
  */
-function convertSharedDocumentFields({ item, publicId, contentType, rewrite, report }) {
+function convertSharedDocumentFields({ item, publicId, contentType, rewrite, report, bodyPolicy }) {
+  const identity = `${contentType}:${publicId}`;
+  const rawBytes = Math.max(item.bodyBytes || 0, checkBodySize(contentText(item), identity, 'WXR body', bodyPolicy));
   const title = resolveTitle(item, publicId, contentType === 'post' ? 'Post' : 'Page');
   const metaDescription = rewriteMediaUrls(
     firstPostMetaValue(item, SEO_DESCRIPTION_META_KEYS),
     rewrite,
   );
-  const content = rewriteMediaUrls(
-    materializeWordPressClassicHtml(contentText(item)),
-    rewrite,
-  );
+  const materialized = materializeWordPressClassicHtml(contentText(item));
+  const content = rewriteMediaUrls(materialized, rewrite, identity, bodyPolicy);
+  const contentBytes = checkBodySize(content, identity, 'converted content', bodyPolicy);
+  addBodyWarning(report, identity, Math.max(rawBytes, contentBytes));
 
   return {
     title,
@@ -1170,6 +1178,7 @@ function convertSharedDocumentFields({ item, publicId, contentType, rewrite, rep
 }
 
 function convertPost({
+  bodyPolicy,
   item,
   publicId,
   publishedAt,
@@ -1185,6 +1194,7 @@ function convertPost({
   usedPostSlugs,
 }) {
   const shared = convertSharedDocumentFields({
+    bodyPolicy,
     item,
     publicId,
     contentType: 'post',
@@ -1229,8 +1239,9 @@ function convertPost({
   return post;
 }
 
-function convertPage({ item, publicId, updatedAt, rewrite, pendingFeaturedImages, report }) {
+function convertPage({ item, publicId, updatedAt, rewrite, pendingFeaturedImages, report, bodyPolicy }) {
   const shared = convertSharedDocumentFields({
+    bodyPolicy,
     item,
     publicId,
     contentType: 'page',

@@ -86,6 +86,7 @@ zeropress-wxr-import --input <file> --output <file.json> [options]
 - `--base <file>`: Optional v0.7 JSON file containing site preset and import settings
 - `--override <file>`: Optional partial settings applied over the base; unknown keys warn and are ignored
 - `--output-format json|chunks`: Single-file JSON by default, or a manifest with bounded JSON chunks
+- `--max-body-bytes <bytes>`: Optional positive UTF-8 body size maximum; no maximum by default
 - `--with-report`: Write the resolved base and import report JSON files
 - `--override-generator-version <version>`: Override only the SemVer label in
   `preview-data.generator`
@@ -701,6 +702,42 @@ children to menu roots. Depths 1 through 10 are retained; a depth-11 item and
 its descendants are discarded. Menu cycles and their descendant subtrees are
 also discarded without preventing unrelated menus from being converted.
 
+## Post and page body limits
+
+Each eligible post/page body warns from **256 KiB (262,144 UTF-8 bytes)**.
+There is no fixed body-size ceiling by default. Markup, whitespace and inline
+data count; linked images do not. Large bodies still consume resources and must
+fit the existing XML, WXR-part, chunk and temporary-storage limits.
+
+Set `--max-body-bytes <bytes>` or API option `maxBodyBytes` to enforce an inclusive
+maximum. For example, `--max-body-bytes 1048576` accepts exactly 1 MiB and rejects
+larger bodies with `CONTENT_BODY_TOO_LARGE`. Omission, `undefined` or `null` in
+the API means no ceiling. Finite values must be positive integers below
+`Number.MAX_SAFE_INTEGER`; the CLI accepts decimal bytes without units or
+exponents. Zero is invalid. All three conversion APIs support the option,
+including browser and bundle conversion. It is not a base/override property.
+
+Checks cover XML-decoded `content:encoded` before trimming and final Preview
+Data `content` after classic HTML materialization and media rewriting. Expansion
+can exceed a configured maximum. Repeated body elements cannot bypass it;
+private, password-protected and other existing exclusions remain unchanged.
+
+With a finite maximum, the parser stops retaining an oversized body while
+finishing eligibility fields. Without one it counts the full accepted body.
+Existing format/resource guards remain active; an API caller may already hold
+a large input string. Content is never truncated or silently skipped to fit.
+Failures preserve previous output, reports and resolved base files.
+
+`report.warnings.large_content_bodies` retains `count`, at most 20 `affected`
+identifiers, `max_body_bytes`, `omitted_examples` and `message`. The CLI prints
+guidance; APIs return diagnostics without logging. Size-error `details` include
+the configured `limitBytes`; `bodyBytes` is a lower bound when `exact` is false.
+No body text is included.
+
+Importer and builder policies are independent: set the option on both when both
+should enforce a ceiling. Relaxed admission does not enable Base64/data-URL
+images or change downstream sanitization.
+
 ## Reports and warnings
 
 The report exposes warnings with one stable shape:
@@ -732,6 +769,7 @@ Defined warning codes include:
 - `locale_inference_skipped`
 - `timezone_inference_skipped`
 - `timezone_inference_ambiguous`
+- `large_content_bodies` (bounded examples and aggregate size metadata above)
 
 `skipped_menu_items` covers incomplete or unresolved menu items, such as a
 missing title, missing URL, or missing referenced content. It is not used for a

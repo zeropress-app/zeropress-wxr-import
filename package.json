@@ -1,6 +1,6 @@
 {
   "name": "@zeropress/wxr-import",
-  "version": "0.7.9",
+  "version": "0.7.11",
   "description": "ZeroPress WXR to preview-data converter CLI",
   "type": "module",
   "main": "./src/api.js",

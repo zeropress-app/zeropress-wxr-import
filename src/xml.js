@@ -53,6 +53,11 @@ export async function parseXml(source, options = {}) {
     throw new Error('Invalid WXR input: shouldRetainItemBody must be a function');
   }
 
+  const onItem = options?.onItem;
+  if (onItem !== undefined && typeof onItem !== 'function') throw new Error('Invalid WXR input: onItem must be a function');
+  const textLimit = options?.maxRetainedTextBytes ?? Infinity;
+  const encoder = new TextEncoder();
+  let itemBytes = 0, insideItem = false;
   const document = createDocumentRecord();
   const stack = [];
   const parser = sax.parser(true, {
@@ -99,6 +104,7 @@ export async function parseXml(source, options = {}) {
       } else if (isElement(node, '', 'item')) {
         frame.role = 'item';
         frame.record = createItemRecord();
+        itemBytes = 0; insideItem = true;
       }
     } else if (parent.role === 'item' && isElement(node, WXR_NAMESPACE, 'postmeta')) {
       frame.role = 'postmeta';
@@ -108,8 +114,18 @@ export async function parseXml(source, options = {}) {
     frame.collectText = shouldCollectText(frame, parent);
     stack.push(frame);
   };
-  parser.ontext = (text) => appendText(stack, text);
-  parser.oncdata = (text) => appendText(stack, text);
+  const receiveText = (text) => {
+    const frame = stack.at(-1);
+    if (textLimit !== Infinity && frame?.collectText) {
+      const bytes = encoder.encode(text).length;
+      frame.textBytes = (frame.textBytes || 0) + bytes;
+      if (insideItem) itemBytes += bytes;
+      if (frame.textBytes > textLimit || itemBytes > textLimit) throw new Error(`Invalid WXR input: retained XML text exceeds ${textLimit} byte working limit`);
+    }
+    appendText(stack, text);
+  };
+  parser.ontext = receiveText;
+  parser.oncdata = receiveText;
   parser.onclosetag = () => {
     const frame = stack.pop();
     if (!frame) {
@@ -126,11 +142,27 @@ export async function parseXml(source, options = {}) {
       value,
       shouldRetainItemBody,
     });
+    if (frame.role === 'item') { insideItem = false; itemBytes = 0; }
   };
 
   const decoder = createUtf8Sanitizer();
   const inputSanitizer = createXmlInputSanitizer();
   let inputMode = null;
+  let drainedItems = 0;
+  async function writeAndDrain(text) {
+    if (!onItem) { writeParserChunk(parser, text); return; }
+    for (let offset = 0; offset < text.length;) {
+      let end = Math.min(offset + 32768, text.length);
+      const last = text.charCodeAt(end - 1), next = text.charCodeAt(end);
+      if (end < text.length && last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+      writeParserChunk(parser, text.slice(offset, end));
+      while (drainedItems < document.items.length) {
+        document.items[drainedItems] = await onItem(document.items[drainedItems], drainedItems);
+        drainedItems++;
+      }
+      offset = end;
+    }
+  }
   try {
     for await (const chunk of source) {
       if (typeof chunk === 'string') {
@@ -138,7 +170,7 @@ export async function parseXml(source, options = {}) {
           throw new Error('Invalid WXR input: mixed string and byte chunks are not supported');
         }
         inputMode = 'string';
-        writeParserChunk(parser, inputSanitizer.write(chunk));
+        await writeAndDrain(inputSanitizer.write(chunk));
         continue;
       }
       if (!(chunk instanceof Uint8Array)) {
@@ -148,12 +180,12 @@ export async function parseXml(source, options = {}) {
         throw new Error('Invalid WXR input: mixed string and byte chunks are not supported');
       }
       inputMode = 'bytes';
-      writeParserChunk(parser, inputSanitizer.write(decoder.write(chunk)));
+      await writeAndDrain(inputSanitizer.write(decoder.write(chunk)));
     }
     if (inputMode === 'bytes') {
-      writeParserChunk(parser, inputSanitizer.write(decoder.end()));
+      await writeAndDrain(inputSanitizer.write(decoder.end()));
     }
-    writeParserChunk(parser, inputSanitizer.end());
+    await writeAndDrain(inputSanitizer.end());
     parser.close();
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Invalid WXR')) {

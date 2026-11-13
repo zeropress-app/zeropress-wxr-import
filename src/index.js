@@ -1,9 +1,11 @@
+import { createDiskWorkStore, readBoundedJson, stagePreviewDataChunks } from '@zeropress/preview-data-validator/node';
+import { jsonFragments } from '@zeropress/preview-data-validator/chunks';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
-import { convertWxrToPreviewData } from './converter.js';
+import { convertWxrToPreviewData, convertWxrToPreviewDataSource } from './converter.js';
 import { createColor } from './color.js';
 import { toTerminalSafeText } from './terminal.js';
 import {
@@ -12,6 +14,7 @@ import {
   ensureSafeDirectory,
   stageAtomicFile,
   validateFilePlan,
+  resolvePathIdentity,
 } from './file-safety.js';
 
 const require = createRequire(import.meta.url);
@@ -21,6 +24,7 @@ const OPTION_IDENTITIES = new Map([
   ['--base', '--base'],
   ['--override', '--override'],
   ['--output', '--output'],
+  ['--output-format', '--output-format'],
   ['--with-report', '--with-report'],
   ['--override-generator-version', '--override-generator-version'],
   ['--help', '--help'],
@@ -64,26 +68,27 @@ export async function run(argv) {
     });
   }
   await validateFilePlan(filePlan);
+  if (args.outputFormat === 'chunks') await assertChunkPartsSafe(filePlan);
 
   const base = args.base
-    ? await readSettingsJsonFile(args.base, 'base')
+    ? await readSettingsJsonFile(args.base, 'base', args.outputFormat === 'chunks')
     : { version: '0.7' };
-  const override = args.override ? await readSettingsJsonFile(args.override, 'override') : undefined;
+  const override = args.override ? await readSettingsJsonFile(args.override, 'override', args.outputFormat === 'chunks') : undefined;
   const generatorVersion = args.generatorVersionOverride ?? PACKAGE_VERSION;
   const inputStream = createReadStream(args.input);
   let conversion;
+  let workStore;
   try {
-    conversion = await convertWxrToPreviewData(inputStream, base, {
-      generatorVersion,
-      override,
-    });
-  } catch (error) {
+    if (args.outputFormat === 'chunks') workStore = await createDiskWorkStore();
+    const convert = workStore ? convertWxrToPreviewDataSource : convertWxrToPreviewData;
+    conversion = await convert(inputStream, base, { generatorVersion, override, workStore });
+    await writeArtifactsAtomically({ args, ...conversion, resolvedBase: conversion.base });
+  } finally {
     inputStream.destroy();
-    throw error;
+    await conversion?.source?.close();
+    await workStore?.close();
   }
-  const { previewData, report, base: resolvedBase } = conversion;
-
-  await writeArtifactsAtomically({ args, previewData, report, resolvedBase });
+  const { report } = conversion;
   const outputFileSizeBytes = (await fs.stat(args.output)).size;
   const elapsedMs = Math.round(performance.now() - startedAt);
   const peakRssMiB = process.resourceUsage().maxRSS / 1024;
@@ -118,6 +123,7 @@ export function parseArgs(argv) {
       || arg === '--base'
       || arg === '--override'
       || arg === '--output'
+      || arg === '--output-format'
       || arg === '--override-generator-version'
     ) {
       const value = argv[index + 1];
@@ -155,6 +161,8 @@ export function parseArgs(argv) {
     );
   }
 
+  const outputFormat = flags['output-format'] ?? 'json';
+  if (!['json', 'chunks'].includes(outputFormat)) throw new Error('Invalid arguments: --output-format must be json or chunks');
   const withReport = flags.withReport === true;
   const artifactDir = withReport
     ? path.join(process.cwd(), '.zeropress-wxr-import')
@@ -173,6 +181,7 @@ export function parseArgs(argv) {
       ? path.join(artifactDir, 'wxr-import-report.json')
       : null,
     withReport,
+    outputFormat,
     generatorVersionOverride: flags.generatorVersionOverride ?? null,
   };
 }
@@ -203,6 +212,7 @@ Required Options:
   --output <file.json>  Output preview-data v0.7 JSON file
 
 Options:
+  --output-format <json|chunks>       Output format (default: json); chunks writes a manifest and immutable parts
   --base <file>                       Optional v0.7 JSON file containing site preset and import settings
   --override <file>                   Optional partial settings applied over the base; unknown keys warn and are ignored
   --with-report                       Write the resolved base and import report JSON files
@@ -216,7 +226,11 @@ Notes:
   - site/theme-specific settings should be provided in the base or override file`);
 }
 
-async function readSettingsJsonFile(filePath, kind) {
+async function readSettingsJsonFile(filePath, kind, bounded = false) {
+  if (bounded) {
+    try { return await readBoundedJson(await fs.realpath(filePath), 16 * 1024 * 1024); }
+    catch (error) { throw new Error(`Invalid ${kind} file: ${error.message}`); }
+  }
   let raw;
   try {
     raw = await fs.readFile(filePath, 'utf8');
@@ -238,15 +252,18 @@ async function readSettingsJsonFile(filePath, kind) {
   }
 }
 
-async function writeArtifactsAtomically({ args, previewData, report, resolvedBase }) {
+async function writeArtifactsAtomically({ args, previewData, source, report, resolvedBase }) {
   const stages = [];
   try {
+    const stagedChunks = source ? await stagePreviewDataChunks(source, args.output) : null;
     if (args.withReport) {
       await ensureSafeDirectory(args.artifactDir);
       stages.push(await stageJsonFile(args.resolvedBaseArtifact, resolvedBase));
       stages.push(await stageJsonFile(args.reportArtifact, report));
     }
-    stages.push(await stageJsonFile(args.output, previewData));
+    stages.push(stagedChunks
+      ? await stageAtomicFile(args.output, stagedChunks.text, { encoding: 'utf8' })
+      : await stageJsonFile(args.output, previewData));
 
     await commitStagedFiles(stages);
   } catch (error) {
@@ -260,7 +277,29 @@ async function writeArtifactsAtomically({ args, previewData, report, resolvedBas
 }
 
 async function stageJsonFile(filePath, value) {
-  return stageAtomicFile(filePath, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8' });
+  return stageAtomicFile(filePath, streamJson(value), { encoding: 'utf8' });
+}
+
+function* streamJson(value) {
+  let buffer = '';
+  for (const fragment of jsonFragments(value)) {
+    buffer += fragment;
+    if (buffer.length >= 64 * 1024) { yield buffer; buffer = ''; }
+  }
+  yield buffer + '\n';
+}
+
+async function assertChunkPartsSafe(plan) {
+  const partsPath = path.join(path.dirname(plan.output), path.basename(plan.output).replace(/(?:\.manifest)?\.json$/, '') + '.parts');
+  const parts = await resolvePathIdentity(partsPath);
+  for (const [role, file] of Object.entries(plan)) {
+    if (!file || role === 'artifactDir') continue;
+    const other = await resolvePathIdentity(file);
+    const relative = path.relative(parts.canonicalPath, other.canonicalPath);
+    const inverse = path.relative(other.canonicalPath, parts.canonicalPath);
+    const within = (value) => value === '' || (value !== '..' && !value.startsWith(`..${path.sep}`) && !path.isAbsolute(value));
+    if (within(relative) || within(inverse)) throw new Error(`Unsafe path collision: chunk parts conflict with ${role}`);
+  }
 }
 
 function printWarnings(report) {

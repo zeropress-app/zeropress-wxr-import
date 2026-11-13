@@ -84,6 +84,7 @@ zeropress-wxr-import --input <file> --output <file.json> [options]
 
 - `--base <file>`: Optional v0.7 JSON file containing site preset and import settings
 - `--override <file>`: Optional partial settings applied over the base; unknown keys warn and are ignored
+- `--output-format json|chunks`: Single-file JSON by default, or a manifest with bounded JSON chunks
 - `--with-report`: Write the resolved base and import report JSON files
 - `--override-generator-version <version>`: Override only the SemVer label in
   `preview-data.generator`
@@ -752,6 +753,50 @@ failures, and write failures exit with status 1.
 
 Values WXR cannot reliably provide—such as theme-specific metadata, newsletter
 settings, and custom category/tag permalink policy—belong in the base file.
+
+## Chunk output for larger exports
+
+The default `--output-format json` and `convertWxrToPreviewData()` result are unchanged.
+For a chunk-capable builder, opt in explicitly:
+
+```sh
+zeropress-wxr-import --input wordpress-export.xml --base wxr-import-base.json \
+  --override wxr-import-base.override.json --output-format chunks \
+  --output .zeropress-wxr/zeropress-preview-data.manifest.json
+zeropress-build ./theme --data .zeropress-wxr/zeropress-preview-data.manifest.json --out dist
+```
+
+This writes a manifest and immutable `zeropress-preview-data.parts/g-<digest>/`
+JSON arrays. Keep the manifest and its referenced generation together, outside
+`public/` and the published output. The format changes storage, not settings,
+sorting, WXR inference, or Preview Data v0.7 validation.
+
+Chunk mode spools parsed WXR records to temporary disk storage, keeps metadata
+for global inference and references, and replays one record at a time. Converted
+bodies are also stored on disk. It does not serialize one whole Preview Data JSON
+string. Unknown overrides, media rewriting, page hierarchy and report semantics
+remain the same. Reports are written incrementally; warning identities still use
+memory proportional to their count.
+
+The transport targets 4 MiB chunks, allows at most 32 MiB per complete chunk, and
+limits the manifest and each base/override JSON file to 16 MiB. Chunk mode guards
+retained XML text at 64 MiB per item or standalone text field; temporary serialized
+values are limited to 128 MiB. An oversized individual record/settings block fails,
+rather than being truncated. These are working bounds, not a universal site limit.
+
+The primary manifest is committed last using the existing file protection and
+optional report ordering. Inputs cannot overlap the chunk parts directory. Temporary
+scratch storage is removed on normal success/failure. Finalized generations are not
+automatically deleted: active readers may still use them. Remove unused generations
+only when imports/builds have stopped. Abrupt process termination can leave scratch
+files or an unreferenced generation; it does not intentionally replace the old entry.
+
+`convertWxrToPreviewDataSource(stream, base, {override, generatorVersion, workStore})`
+returns `{source, base, report}`. The source is replayable and supports incremental
+validation/building. The caller supplies and closes a `put/get` work store and closes
+the source in `finally`. Node hosts can use `createDiskWorkStore` from the validator's
+`/node` entry; browser hosts can provide an asynchronous backing store. The existing
+object API stays filesystem independent and keeps its previous memory behavior.
 
 ## License
 

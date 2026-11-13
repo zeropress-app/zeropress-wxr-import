@@ -1,8 +1,9 @@
+import { createDiskWorkStore } from '@zeropress/preview-data-validator/node';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import { validatePreviewData } from '@zeropress/preview-data-validator';
-import { convertWxrToPreviewData } from '../src/converter.js';
+import { convertWxrToPreviewData, convertWxrToPreviewDataSource } from '../src/converter.js';
 
 test('converts published WXR content into valid preview-data', async () => {
   const { previewData, report, base: resolvedBase } = await convert(sampleWxr(), base(), {
@@ -248,8 +249,22 @@ test('rejects generated sections in base files', async () => {
   await assert.rejects(() => convert(sampleWxr(), { unknown: true }), /unknown top-level key unknown/);
 });
 
-function convert(xml, baseData, options) {
-  return convertWxrToPreviewData(Readable.from([xml]), baseData, options);
+async function convert(xml, baseData, options) {
+  const expected = await convertWxrToPreviewData(Readable.from([xml]), baseData, options);
+  const workStore = await createDiskWorkStore();
+  let actual;
+  try {
+    actual = await convertWxrToPreviewDataSource(Readable.from([xml]), baseData, { ...options, workStore });
+    const previewData = { ...actual.source.header, content: {} };
+    for (const name of actual.source.collections) {
+      previewData.content[name] = [];
+      for await (const entry of actual.source.records(name)) previewData.content[name].push(entry.value);
+    }
+    assert.deepEqual(previewData, expected.previewData);
+    assert.deepEqual(actual.report, expected.report);
+    assert.deepEqual(actual.base, expected.base);
+    return expected;
+  } finally { await actual?.source?.close(); await workStore.close(); }
 }
 
 function base() {

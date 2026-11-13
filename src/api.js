@@ -1,5 +1,5 @@
 import metadata from '../package.json' with { type: 'json' };
-import { convertWxrToPreviewData as convert } from './converter.js';
+import { convertWxrToPreviewData as convert, convertWxrToPreviewDataSource as convertSource } from './converter.js';
 
 export const converterVersion = metadata.version;
 
@@ -15,3 +15,8 @@ export function convertWxrToPreviewData(source, base = { version: '0.7' }, optio
 }
 
 export { normalizeBase as validateBase } from './base.js';
+
+/** Replayable conversion; the caller owns the supplied temporary work store. */
+export function convertWxrToPreviewDataSource(source, base = { version: '0.7' }, options = {}) {
+  return convertSource(source, base, { ...options, generatorVersion: options.generatorVersion ?? converterVersion });
+}

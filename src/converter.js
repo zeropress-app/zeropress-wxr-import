@@ -1,6 +1,9 @@
+import { assertValidation } from '@zeropress/preview-data-validator/chunks';
 import {
   canonicalizePreviewDataKeyOrder,
   validatePreviewData,
+  createPreviewDataValidationSession,
+  canonicalizePreviewDataRecord,
 } from '@zeropress/preview-data-validator';
 import {
   createBaseWidgets,
@@ -67,12 +70,33 @@ const SEO_DESCRIPTION_META_KEYS = Object.freeze([
   '_aioseo_description',
   '_genesis_description',
 ]);
+const RAW_RECORD = Symbol('raw WXR record');
+const BODY_RECORD = Symbol('converted body');
+
 export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
+  return convertInternal(xmlSource, base, options);
+}
+
+export async function convertWxrToPreviewDataSource(xmlSource, base, options = {}) {
+  if (!options.workStore?.put || !options.workStore?.get) throw new Error('Chunk conversion requires a workStore with put/get');
+  return convertInternal(xmlSource, base, options, options.workStore);
+}
+
+async function convertInternal(xmlSource, base, options, workStore) {
   const report = createReport();
   const baseData = normalizeBaseWithOverride(base, options.override, report);
   const widgets = createBaseWidgets(baseData.widgets);
   const doc = await parseXml(xmlSource, {
     shouldRetainItemBody: isConvertibleDocumentItem,
+    ...(workStore ? {
+      maxRetainedTextBytes: 64 * 1024 * 1024,
+      async onItem(item) {
+        const ref = await workStore.put(item);
+        // Only fields used by global inference remain resident. Conversion replays
+        // the complete original record after all inference passes finish.
+        return { title: item.title, link: item.link, creator: item.creator, wp: item.wp, [RAW_RECORD]: ref };
+      },
+    } : {}),
   });
   const channel = doc.channel;
   const generatedAt = parseRssPubDateToUtcSecondIso(directChildText(channel, 'pubDate'));
@@ -171,7 +195,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   // items — media import, time zone, and permalink inference — must therefore
   // run before this point, and no pass may be added after it.
   for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
-    const item = items[itemIndex];
+    const item = workStore ? await workStore.get(items[itemIndex][RAW_RECORD]) : items[itemIndex];
     items[itemIndex] = null;
     const postType = wpText(item, 'post_type');
 
@@ -246,6 +270,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
         pendingFeaturedImages,
         usedPostSlugs,
       });
+      if (workStore) await storeConvertedBody(post, workStore);
       posts.push(post);
       postsByWpId.set(String(publicId), {
         slug: post.slug,
@@ -263,6 +288,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
       pendingFeaturedImages,
       report,
     });
+    if (workStore) await storeConvertedBody(pageRecord.page, workStore);
     pages.push(pageRecord.page);
     pageRecords.push(pageRecord);
   }
@@ -344,12 +370,40 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
     previewData.custom_html = baseData.custom_html;
   }
 
-  const canonicalPreviewData = canonicalizePreviewDataKeyOrder(previewData);
-  const validation = validatePreviewData(canonicalPreviewData);
-  if (!validation.ok) {
-    const first = validation.errors[0];
-    const reason = first ? `${first.code} ${first.path}: ${first.message}` : 'unknown validation error';
-    throw new Error(`Generated preview-data failed validation: ${reason}`);
+  let canonicalPreviewData, source;
+  if (workStore) {
+    const { content: records, ...header } = previewData;
+    let closed = false;
+    source = {
+      header: canonicalizePreviewDataKeyOrder(header),
+      collections: Object.keys(records),
+      async *records(collection) {
+        if (closed) throw new Error('Converted Preview Data source is closed');
+        for (const [index, compact] of (records[collection] || []).entries()) {
+          const value = Object.hasOwn(compact, BODY_RECORD)
+            ? { ...compact, ...await workStore.get(compact[BODY_RECORD]) }
+            : compact;
+          // Symbols are private storage pointers and never enter the JSON contract.
+          const plain = Object.fromEntries(Object.entries(value));
+          yield { index, value: canonicalizePreviewDataRecord(collection, plain) };
+        }
+      },
+      async close() { closed = true; for (const rows of Object.values(records)) rows.length = 0; },
+    };
+    const validation = createPreviewDataValidationSession(source.header);
+    assertValidation(validation.headerResult, 'Generated preview-data failed validation');
+    for (const collection of source.collections) for await (const entry of source.records(collection)) {
+      assertValidation(validation.add(collection, entry.value), 'Generated preview-data failed validation');
+    }
+    assertValidation(validation.finish(), 'Generated preview-data failed validation');
+  } else {
+    canonicalPreviewData = canonicalizePreviewDataKeyOrder(previewData);
+    const validation = validatePreviewData(canonicalPreviewData);
+    if (!validation.ok) {
+      const first = validation.errors[0];
+      const reason = first ? `${first.code} ${first.path}: ${first.message}` : 'unknown validation error';
+      throw new Error(`Generated preview-data failed validation: ${reason}`);
+    }
   }
 
   report.counts = {
@@ -363,7 +417,7 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
   };
 
   return {
-    previewData: canonicalPreviewData,
+    ...(source ? { source } : { previewData: canonicalPreviewData }),
     report,
     base: createResolvedBase({
       baseData,
@@ -372,6 +426,13 @@ export async function convertWxrToPreviewData(xmlSource, base, options = {}) {
       configuredMediaOrigin,
     }),
   };
+}
+
+async function storeConvertedBody(record, workStore) {
+  const payload = { content: record.content, excerpt: record.excerpt };
+  record[BODY_RECORD] = await workStore.put(payload);
+  record.content = '';
+  record.excerpt = '';
 }
 
 function comparePostsByPublishedAtDesc(left, right) {
